@@ -1,0 +1,74 @@
+[build-system]
+requires = ["hatchling>=1.27,<2"]
+build-backend = "hatchling.build"
+
+[project]
+name = "spiritcode"
+dynamic = ["version"]
+description = "Терминальный кодинг-агент для SpiritLM"
+readme = "README.md"
+requires-python = ">=3.12"
+keywords = ["spiritlm", "coding-agent", "terminal", "ai"]
+classifiers = [
+  "Development Status :: 3 - Alpha",
+  "Environment :: Console",
+  "Intended Audience :: Developers",
+  "Operating System :: OS Independent",
+  "Programming Language :: Python :: 3",
+  "Programming Language :: Python :: 3 :: Only",
+  "Programming Language :: Python :: 3.12",
+  "Programming Language :: Python :: 3.13",
+  "Topic :: Software Development",
+]
+dependencies = [
+  "httpx>=0.28,<1",
+  "keyring>=25,<26",
+  "pathspec>=0.12,<1",
+  "platformdirs>=4,<5",
+  "prompt-toolkit>=3.0.48,<4",
+  "pydantic>=2.10,<3",
+  "rich>=13.9,<15",
+]
+
+[project.scripts]
+sprt = "spiritcode.cli:main"
+spiritcode = "spiritcode.cli:main"
+
+[tool.hatch.version]
+path = "src/spiritcode/__init__.py"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/spiritcode"]
+# Keep artifacts compatible with Twine 6 and pip versions supporting Python 3.12.
+core-metadata-version = "2.4"
+
+[tool.hatch.build.targets.sdist]
+core-metadata-version = "2.4"
+include = [
+  "/src",
+  "/tests",
+  "/scripts/check_install.py",
+  "/scripts/publish.py",
+  "/README.md",
+  "/image.png",
+  "/SERVER_CONTRACT.md",
+  "/pyproject.toml",
+]
+
+[dependency-groups]
+dev = ["pytest>=8,<10", "pytest-asyncio>=0.25,<2", "ruff>=0.9,<1", "mypy>=1.15,<2", "build>=1,<2", "twine>=6,<7"]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]
+
+[tool.ruff]
+target-version = "py312"
+line-length = 100
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "ASYNC"]
+
+[tool.mypy]
+python_version = "3.12"
+strict = true
