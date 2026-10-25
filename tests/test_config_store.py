@@ -1,8 +1,42 @@
 from unittest.mock import patch
 
+import pytest
+
 from spiritcode.config import Settings
 from spiritcode.credentials import Credentials
 from spiritcode.store import Store, new_session
+
+
+@pytest.mark.parametrize(
+    ("environment", "expected"),
+    [
+        (None, "https://spiritlm.netlify.app"),
+        ("", "https://spiritlm.netlify.app"),
+        ("production", "https://spiritlm.netlify.app"),
+        ("test", "https://spiritlm.netlify.app"),
+        ("dev", "http://localhost:3000"),
+        ("development", "http://localhost:3000"),
+    ],
+)
+def test_default_server_follows_node_env(tmp_path, monkeypatch, environment, expected):
+    monkeypatch.delenv("SPIRITLM_BASE_URL", raising=False)
+    if environment is None:
+        monkeypatch.delenv("NODE_ENV", raising=False)
+    else:
+        monkeypatch.setenv("NODE_ENV", environment)
+    with patch("spiritcode.config.config_path", return_value=tmp_path / "config.toml"):
+        assert Settings().base_url == expected
+        assert Settings.load().base_url == expected
+
+
+def test_saving_model_does_not_pin_environment_server(tmp_path, monkeypatch):
+    monkeypatch.delenv("SPIRITLM_BASE_URL", raising=False)
+    monkeypatch.setenv("NODE_ENV", "development")
+    with patch("spiritcode.config.config_path", return_value=tmp_path / "config.toml"):
+        Settings.load().save_model("test-model")
+        monkeypatch.delenv("NODE_ENV")
+        assert Settings.load().base_url == "https://spiritlm.netlify.app"
+        assert Settings.load().model == "test-model"
 
 
 def test_config_precedence_and_no_keys(tmp_path, monkeypatch):

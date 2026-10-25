@@ -7,6 +7,7 @@ from typing import Any, Literal
 
 from prompt_toolkit import PromptSession
 from prompt_toolkit.application import Application
+from prompt_toolkit.buffer import Buffer
 from prompt_toolkit.completion import Completer, Completion, DummyCompleter, PathCompleter
 from prompt_toolkit.document import Document
 from prompt_toolkit.filters import Condition, has_completions, is_done
@@ -54,7 +55,7 @@ class InputCompleter(Completer):
 
     def get_completions(self, document: Document, complete_event: Any) -> Iterable[Completion]:
         text = document.text_before_cursor
-        if text.startswith("/"):
+        if not document.text or text.startswith("/"):
             command, separator, argument = text.partition(" ")
             if not separator:
                 for item in COMMANDS:
@@ -310,6 +311,18 @@ class UI:
                 )
                 return await password_prompt.prompt_async(clean(text), is_password=True)
             self.chat_input = chat
+            buffer = self.prompt.default_buffer
+            previous_text = ""
+
+            def complete_after_deletion(changed_buffer: Buffer) -> None:
+                nonlocal previous_text
+                deleted = len(changed_buffer.text) < len(previous_text)
+                previous_text = changed_buffer.text
+                if deleted and (chat or completer is not None):
+                    changed_buffer.start_completion()
+
+            # prompt-toolkit only autocompletes insertions by default.
+            buffer.on_text_changed += complete_after_deletion
             extended_keyboard = prepare_keyboard(self.prompt.app.input) and chat
             output = self.prompt.app.output
             if extended_keyboard:
@@ -327,6 +340,7 @@ class UI:
                     self._print(Text("❯ " + clean(result), style=COLORS["accent"]))
                 return result
             finally:
+                buffer.on_text_changed -= complete_after_deletion
                 if extended_keyboard:
                     output.write_raw("\x1b[<u")
                     output.flush()

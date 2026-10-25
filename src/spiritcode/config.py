@@ -2,13 +2,14 @@
 
 import os
 import tomllib
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from urllib.parse import urlsplit
 
 from platformdirs import user_config_path, user_data_path
 
-BASE_URL = "http://localhost:3000"
+BASE_URL = "https://spiritlm.netlify.app"
+DEV_BASE_URL = "http://localhost:3000"
 API_PATHS = {
     "models": "/v1/models",
     "metadata": "/v1/spiritcode/models",
@@ -59,6 +60,12 @@ def data_path() -> Path:
     return user_data_path("spiritcode")
 
 
+def default_base_url() -> str:
+    if os.getenv("NODE_ENV") in {"dev", "development"}:
+        return DEV_BASE_URL
+    return BASE_URL
+
+
 def validate_base_url(value: str) -> str:
     parts = urlsplit(value)
     local = parts.hostname in {"localhost", "127.0.0.1", "::1"}
@@ -78,7 +85,7 @@ def validate_base_url(value: str) -> str:
 
 @dataclass
 class Settings:
-    base_url: str = BASE_URL
+    base_url: str = field(default_factory=default_base_url)
     model: str | None = None
     color: bool = True
 
@@ -91,7 +98,9 @@ class Settings:
         values = tomllib.loads(path.read_text("utf-8")) if path.exists() else {}
         return cls(
             validate_base_url(
-                base_url or os.getenv("SPIRITLM_BASE_URL") or values.get("base_url", BASE_URL)
+                base_url
+                or os.getenv("SPIRITLM_BASE_URL")
+                or values.get("base_url", default_base_url())
             ),
             model or os.getenv("SPIRITLM_MODEL") or values.get("model"),
             "NO_COLOR" not in os.environ and values.get("color", True),
@@ -103,10 +112,16 @@ class Settings:
         self.model = model
         path = config_path()
         path.parent.mkdir(parents=True, exist_ok=True)
+        # Keep automatic environment selection active after changing models.
+        server_config = (
+            f"base_url = {json.dumps(self.base_url)}\n"
+            if self.base_url != default_base_url()
+            else ""
+        )
         # JSON quoted strings are compatible with TOML basic strings here.
         path.write_text(
-            f"base_url = {json.dumps(self.base_url)}\n"
-            f"model = {json.dumps(model, ensure_ascii=False)}\n"
+            server_config
+            + f"model = {json.dumps(model, ensure_ascii=False)}\n"
             f"color = {str(self.color).lower()}\n",
             encoding="utf-8",
         )

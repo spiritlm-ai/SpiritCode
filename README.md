@@ -14,6 +14,11 @@ sprt
 При первом запуске введите API-ключ SpiritLM, затем выберите модель через `/model`.
 `spiritcode` и `python -m spiritcode` — альтернативные способы запуска.
 
+По умолчанию используется `https://spiritlm.netlify.app`. Для локальной разработки
+запускайте `NODE_ENV=development sprt` (также поддерживается `dev`) — API будет
+доступен по `http://localhost:3000`. Явный адрес в `--base-url`, `SPIRITLM_BASE_URL`
+или `config.toml` имеет приоритет над автоматическим выбором.
+
 ## Команды
 
 | Команда | Описание |

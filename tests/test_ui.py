@@ -365,6 +365,21 @@ async def test_palette_enter_accepts_without_submitting_and_escape_dismisses():
             task = asyncio.create_task(ui.ask(chat=True))
             pipe.send_text("/mod")
             await wait_for(lambda: buffer.complete_state is not None)
+            pipe.send_text("\x7f")
+            await wait_for(
+                lambda: buffer.text == "/mo" and buffer.complete_state is not None
+            )
+            pipe.send_text("\x15")
+            await wait_for(lambda: buffer.text == "" and buffer.complete_state is not None)
+            from spiritcode.commands import COMMANDS
+
+            assert [entry.text for entry in buffer.complete_state.completions] == [
+                command.name for command in COMMANDS
+            ]
+            pipe.send_text("/mod")
+            await wait_for(
+                lambda: buffer.text == "/mod" and buffer.complete_state is not None
+            )
             pipe.send_text("\x1b")
             await wait_for(lambda: buffer.complete_state is None)
             assert buffer.text == "/mod"

@@ -92,7 +92,7 @@ async def test_statuses_and_redirect_do_not_leak_or_retry(status):
             await client.get("models")
         assert "PRIVATE" not in str(error.value)
         assert len(requests) == 1
-        assert requests[0].url.host == "localhost"
+        assert requests[0].url.host == httpx.URL(client.settings.base_url).host
     finally:
         await client.close()
 
