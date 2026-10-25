@@ -11,6 +11,7 @@ from prompt_toolkit.buffer import Buffer
 from prompt_toolkit.completion import Completer, Completion, DummyCompleter, PathCompleter
 from prompt_toolkit.document import Document
 from prompt_toolkit.filters import Condition, has_completions, is_done
+from prompt_toolkit.formatted_text import StyleAndTextTuples
 from prompt_toolkit.history import DummyHistory
 from prompt_toolkit.input.ansi_escape_sequences import ANSI_SEQUENCES
 from prompt_toolkit.key_binding import KeyBindings
@@ -31,7 +32,7 @@ from rich.table import Table
 from rich.text import Text
 
 from spiritcode.commands import COMMANDS
-from spiritcode.config import COLORS, STAR
+from spiritcode.config import COLORS, PERMISSION_MODES, STAR, PermissionMode, Settings
 from spiritcode.keyboard import prepare_keyboard
 
 ANSI = re.compile(r"\x1b(?:\][^\x07\x1b]*(?:\x07|\x1b\\)|\[[0-?]*[ -/]*[@-~]|[@-_])")
@@ -357,6 +358,83 @@ class UI:
         if chat and value.strip():
             self._print(Text("❯ " + clean(value), style=COLORS["accent"]))
         return value
+
+    async def choose_permissions(self, settings: Settings) -> tuple[PermissionMode, bool] | None:
+        if self.prompt is None:
+            self.notice("Настройки не изменены", "Нужен интерактивный терминал.", "warning")
+            return None
+        labels = ("Стандартная защита", "Без защиты", "Полная защита")
+        details = (
+            "Git, удаление, перезапись и непрозрачные команды требуют разрешения.",
+            "Команды выполняются автоматически с учётом чекбокса удаления.",
+            "Каждая shell-команда требует разрешения. Точечные правки автоматические.",
+        )
+        selected = PERMISSION_MODES.index(settings.permission_mode)
+        deletion = settings.confirm_deletion
+        keys = KeyBindings()
+
+        @keys.add("up")
+        def previous(event: Any) -> None:
+            nonlocal selected
+            selected = (selected - 1) % len(labels)
+
+        @keys.add("down")
+        def following(event: Any) -> None:
+            nonlocal selected
+            selected = (selected + 1) % len(labels)
+
+        @keys.add(" ")
+        def toggle(event: Any) -> None:
+            nonlocal deletion
+            if selected == 1:
+                deletion = not deletion
+
+        @keys.add("enter")
+        def accept(event: Any) -> None:
+            event.app.exit(result=(PERMISSION_MODES[selected], deletion))
+
+        @keys.add("escape")
+        @keys.add("c-c")
+        @keys.add("c-d")
+        def cancel(event: Any) -> None:
+            event.app.exit(result=None)
+
+        def content() -> StyleAndTextTuples:
+            rows: StyleAndTextTuples = [("", "Разрешения · для всех проектов\n\n")]
+            for index, label in enumerate(labels):
+                rows.append(
+                    (
+                        "class:prompt" if index == selected else "",
+                        ("❯ " if index == selected else "  ") + label + "\n",
+                    )
+                )
+            rows.append(("", "\n" + details[selected] + "\n"))
+            if selected == 1:
+                rows.append(("", ("[x]" if deletion else "[ ]") + " Спрашивать перед удалением\n"))
+            rows.append(
+                (
+                    "class:hint",
+                    "\n↑/↓ — режим · Space — чекбокс · Enter — сохранить · Esc — назад\n"
+                    "Подтверждения не являются системной песочницей.\n",
+                )
+            )
+            return rows
+
+        from prompt_toolkit.layout import Layout
+
+        app: Application[tuple[PermissionMode, bool] | None] = Application(
+            layout=Layout(Window(FormattedTextControl(content))),
+            key_bindings=keys,
+            style=self.style,
+            input=self.prompt.app.input,
+            output=self.prompt.app.output,
+            full_screen=False,
+            erase_when_done=True,
+        )
+        try:
+            return await app.run_async()
+        except (EOFError, KeyboardInterrupt):
+            return None
 
     async def approve(self, description: str) -> bool:
         self.notice("Ожидание разрешения", description, "warning")

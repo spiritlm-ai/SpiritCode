@@ -61,7 +61,7 @@ class Agent:
             "max_tokens": output,
             "stream_options": {"include_usage": True},
         }
-        if tools and self.model.tool_calling is True:
+        if tools and self.model.tool_calling is not False:
             payload["tools"] = definitions()
         return payload
 
@@ -80,6 +80,15 @@ class Agent:
             result = await self._response(messages, diagnostic, tools=tools, visible=visible)
             diagnostic["status"] = "completed"
             return result
+        except ApiError as exc:
+            if tools and self.model.tool_calling is not False and exc.status in {400, 422}:
+                raise ApiError(
+                    "SpiritLM отклонил запрос с инструментами. Возможно, модель их не "
+                    "поддерживает. Выберите другую через /model. Запрос не повторялся.",
+                    exc.status,
+                    exc.request_id,
+                ) from exc
+            raise
         except (asyncio.CancelledError, KeyboardInterrupt):
             diagnostic["status"] = "cancelled"
             raise
@@ -135,7 +144,7 @@ class Agent:
                 self.ui.end_response()
         if finish is None or (calls and finish != "tool_calls"):
             raise ApiError("Ответ SpiritLM неполон; инструменты не выполнялись.")
-        if calls and (not tools or self.model.tool_calling is not True):
+        if calls and (not tools or self.model.tool_calling is False):
             raise ApiError("Инструменты для этой модели не разрешены.")
         ids = [call["id"] for call in calls.values()]
         if any(not value for value in ids) or len(ids) != len(set(ids)):

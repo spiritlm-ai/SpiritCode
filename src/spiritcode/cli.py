@@ -22,12 +22,6 @@ from spiritcode.store import Store, new_session
 from spiritcode.tools import Tools, unified
 from spiritcode.ui import UI, clean
 
-PERMISSIONS = """Чтение и правки в проекте разрешены автоматически.
-Каждая команда и каждый доступ вне проекта требуют отдельного разрешения.
-Секреты читаются только после разрешения и не редактируются инструментами.
-Симлинки проверяются по фактическому пути. Команды имеют права пользователя:
-подтверждение не является системной песочницей. /undo не отменяет команды."""
-
 
 class RussianParser(argparse.ArgumentParser):
     def __init__(self, **kwargs: Any) -> None:
@@ -71,8 +65,8 @@ async def resolve_model(client: Client, ui: UI, requested: str | None) -> Model 
     selected = next((model for model in models if model.id == requested), None)
     if selected is None:
         ui.notice("Модель недоступна", "Выберите доступную модель через /model.", "warning")
-    elif selected.tool_calling is not True:
-        ui.muted("Режим чата · поддержка инструментов не подтверждена сервером.")
+    elif selected.tool_calling is False:
+        ui.muted("Режим чата · модель не поддерживает инструменты. Выберите другую через /model.")
     set_model_label(ui, selected)
     return selected
 
@@ -228,10 +222,12 @@ async def interactive(
     requested = session["model"] if session else settings.model
     if not header_shown:
         ui.header(requested, root)
+    if settings.permissions_warning:
+        ui.notice("Настройки разрешений сброшены", "Включена стандартная защита.", "warning")
     model = await resolve_model(client, ui, requested)
     set_model_label(ui, model)
     session = session or new_session(root, model.id if model else "")
-    tools = Tools(root, ui, session["snapshots"])
+    tools = Tools(root, ui, session["snapshots"], settings)
     agent = Agent(client, model, session, store, tools, ui) if model else None
     store.save(session)
     os.chdir(root)
@@ -277,8 +273,11 @@ async def interactive(
                 break
             if command == "/help":
                 ui.say(help_text())
-            elif command == "/permissions":
-                ui.notice("Разрешения", PERMISSIONS)
+            elif command in {"/permission", "/permissions"}:
+                choice = await ui.choose_permissions(settings)
+                if choice is not None:
+                    settings.save_permissions(*choice)
+                    ui.notice("Разрешения сохранены", "Настройки действуют для всех проектов.")
             elif command == "/context":
                 await cancellable(show_context(session, agent, ui), ui)
             elif command == "/model":
@@ -294,6 +293,12 @@ async def interactive(
                     agent = Agent(client, model, session, store, tools, ui)
                 store.save(session)
                 ui.reset(model.id, root)
+                if model.tool_calling is False:
+                    ui.notice(
+                        "Режим чата",
+                        "Модель не поддерживает инструменты. Выберите другую через /model.",
+                        "warning",
+                    )
             elif command in {"/profile", "/balance", "/subscription", "/usage"}:
                 await cancellable(account(client, ui, command[1:], argument or "2d"), ui)
             elif command == "/sessions":
@@ -310,7 +315,7 @@ async def interactive(
                 if command == "/resume":
                     model = await resolve_model(client, ui, replacement["model"])
                 root, session = replacement_root, replacement
-                tools = Tools(root, ui, session["snapshots"])
+                tools = Tools(root, ui, session["snapshots"], settings)
                 agent = Agent(client, model, session, store, tools, ui) if model else None
                 store.save(session)
                 os.chdir(root)

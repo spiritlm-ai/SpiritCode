@@ -6,6 +6,7 @@ import sys
 
 import pytest
 
+from spiritcode.config import Settings
 from spiritcode.tools import Tools, project_files
 from spiritcode.ui import UI, clean
 
@@ -35,7 +36,7 @@ class FakeUI(UI):
 
 @pytest.fixture
 def tools(tmp_path):
-    tools = Tools(tmp_path, FakeUI(), [])
+    tools = Tools(tmp_path, FakeUI(), [], Settings(permission_mode="full"))
     tools.start_turn()
     return tools
 

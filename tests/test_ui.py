@@ -366,9 +366,7 @@ async def test_palette_enter_accepts_without_submitting_and_escape_dismisses():
             pipe.send_text("/mod")
             await wait_for(lambda: buffer.complete_state is not None)
             pipe.send_text("\x7f")
-            await wait_for(
-                lambda: buffer.text == "/mo" and buffer.complete_state is not None
-            )
+            await wait_for(lambda: buffer.text == "/mo" and buffer.complete_state is not None)
             pipe.send_text("\x15")
             await wait_for(lambda: buffer.text == "" and buffer.complete_state is not None)
             from spiritcode.commands import COMMANDS
@@ -377,9 +375,7 @@ async def test_palette_enter_accepts_without_submitting_and_escape_dismisses():
                 command.name for command in COMMANDS
             ]
             pipe.send_text("/mod")
-            await wait_for(
-                lambda: buffer.text == "/mod" and buffer.complete_state is not None
-            )
+            await wait_for(lambda: buffer.text == "/mod" and buffer.complete_state is not None)
             pipe.send_text("\x1b")
             await wait_for(lambda: buffer.complete_state is None)
             assert buffer.text == "/mod"
@@ -392,3 +388,40 @@ async def test_palette_enter_accepts_without_submitting_and_escape_dismisses():
                     await task
                 except asyncio.CancelledError:
                     pass
+
+
+@pytest.mark.parametrize(
+    "keys,expected",
+    [
+        ("\x1b[B \r", ("unrestricted", False)),
+        ("\x1b[A\r", ("full", True)),
+        ("\x1b[B\x1b", None),
+        ("\x03", None),
+    ],
+)
+async def test_permission_menu_keyboard_and_cancel(keys, expected):
+    import asyncio
+
+    from prompt_toolkit import PromptSession
+    from prompt_toolkit.input import create_pipe_input
+    from prompt_toolkit.output import DummyOutput
+
+    from spiritcode.config import Settings
+
+    ui = UI(color=False)
+    settings = Settings()
+    with create_pipe_input() as pipe:
+        ui.prompt = PromptSession(input=pipe, output=DummyOutput())
+        pipe.send_text(keys)
+        async with asyncio.timeout(3):
+            assert await ui.choose_permissions(settings) == expected
+    assert settings.permission_mode == "standard"
+    assert settings.confirm_deletion
+
+
+async def test_permission_menu_without_terminal_preserves_settings():
+    from spiritcode.config import Settings
+
+    ui = UI(color=False)
+    ui.prompt = None
+    assert await ui.choose_permissions(Settings()) is None

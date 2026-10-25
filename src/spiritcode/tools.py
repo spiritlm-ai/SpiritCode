@@ -15,8 +15,9 @@ from spiritcode.config import (
     MAX_FILE_BYTES,
     MAX_FILES,
     MAX_RESULT_CHARS,
+    Settings,
 )
-from spiritcode.permissions import Permissions, is_secret
+from spiritcode.permissions import Permissions, approve_command, is_secret
 from spiritcode.ui import KEY, UI, clean
 
 
@@ -70,7 +71,9 @@ DESCRIPTIONS = {
     "read_file": "Read UTF-8 file lines (inclusive, 1-based), and scoped AGENTS.md instructions.",
     "create_file": "Create a new UTF-8 file. Fails if a file already exists.",
     "edit_file": "Replace exactly one occurrence of old_text. Read the file first.",
-    "run_command": "Run shell command in explicit cwd after user approval. Not a sandbox.",
+    "run_command": (
+        "Run any shell command in explicit cwd under the active permission policy. Not a sandbox."
+    ),
 }
 
 
@@ -149,8 +152,15 @@ def unified(path: str, before: str | None, after: str | None) -> str:
 
 
 class Tools:
-    def __init__(self, root: Path, ui: UI, snapshots: list[list[dict[str, Any]]]) -> None:
+    def __init__(
+        self,
+        root: Path,
+        ui: UI,
+        snapshots: list[list[dict[str, Any]]],
+        settings: Settings | None = None,
+    ) -> None:
         self.root, self.ui, self.snapshots = root.resolve(), ui, snapshots
+        self.settings = settings if settings is not None else Settings()
         self.permissions = Permissions(root, ui)
         self.group: list[dict[str, Any]] = []
         self.reads: dict[Path, str] = {}
@@ -271,12 +281,16 @@ class Tools:
         return "Файл изменён.\n" + diff
 
     async def run(self, args: RunCommand) -> str:
-        cwd = await self.permissions.path(args.cwd, "Рабочая директория команды")
-        description = f"Команда: {args.command}\nКаталог: {cwd}\nТаймаут: {args.timeout} с"
-        if args.timeout > COMMAND_TIMEOUT:
-            description += "\nУвеличенный лимит времени."
-        if not await self.ui.approve(description):
+        raw = self.root / await asyncio.to_thread(Path(args.cwd).expanduser)
+        cwd = raw.resolve()
+        if not cwd.is_dir():
+            raise ValueError("Рабочая директория не существует.")
+        if not await approve_command(
+            self.settings, self.ui, self.root, args.command, cwd, args.timeout
+        ):
             return "Пользователь отклонил запуск команды."
+        if raw.resolve() != cwd:
+            raise PermissionError("Путь изменился во время подтверждения.")
         env = {k: v for k, v in os.environ.items() if k.upper() != "SPIRITLM_API_KEY"}
         options: dict[str, Any] = {}
         if os.name == "nt":

@@ -79,3 +79,36 @@ def test_session_redacts_keys_and_preserves_money(tmp_path):
     assert "private" not in str(restored)
     assert "0.00000001" in str(restored)
     store.close()
+
+
+@pytest.mark.parametrize("mode", ["standard", "unrestricted", "full"])
+@pytest.mark.parametrize("deletion", [True, False])
+def test_permission_settings_round_trip_and_model_changes(tmp_path, mode, deletion):
+    with patch("spiritcode.config.config_path", return_value=tmp_path / "config.toml"):
+        settings = Settings()
+        settings.save_permissions(mode, deletion)
+        settings.save_model("next")
+        restored = Settings.load()
+        assert restored.permission_mode == mode
+        assert restored.confirm_deletion is deletion
+        assert restored.model == "next"
+        restored.save_permissions("standard", True)
+        assert Settings.load().model == "next"
+
+
+@pytest.mark.parametrize(
+    "values",
+    [
+        'permission_mode = "invalid"',
+        'confirm_deletion = "false"',
+        'permission_mode = ["full"]',
+    ],
+)
+def test_invalid_permission_settings_fail_closed(tmp_path, values):
+    path = tmp_path / "config.toml"
+    path.write_text(values)
+    with patch("spiritcode.config.config_path", return_value=path):
+        settings = Settings.load()
+        assert settings.permission_mode == "standard"
+        assert settings.confirm_deletion is True
+        assert settings.permissions_warning

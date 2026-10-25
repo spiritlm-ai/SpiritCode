@@ -4,6 +4,7 @@ import os
 import tomllib
 from dataclasses import dataclass, field
 from pathlib import Path
+from typing import Literal
 from urllib.parse import urlsplit
 
 from platformdirs import user_config_path, user_data_path
@@ -83,11 +84,18 @@ def validate_base_url(value: str) -> str:
     return value.rstrip("/")
 
 
+PermissionMode = Literal["standard", "unrestricted", "full"]
+PERMISSION_MODES: tuple[PermissionMode, ...] = ("standard", "unrestricted", "full")
+
+
 @dataclass
 class Settings:
     base_url: str = field(default_factory=default_base_url)
     model: str | None = None
     color: bool = True
+    permission_mode: PermissionMode = "standard"
+    confirm_deletion: bool = True
+    permissions_warning: bool = False
 
     def url(self, name: str) -> str:
         return self.base_url + API_PATHS[name]
@@ -96,6 +104,9 @@ class Settings:
     def load(cls, base_url: str | None = None, model: str | None = None) -> "Settings":
         path = config_path()
         values = tomllib.loads(path.read_text("utf-8")) if path.exists() else {}
+        mode = values.get("permission_mode", "standard")
+        deletion = values.get("confirm_deletion", True)
+        invalid = mode not in PERMISSION_MODES or not isinstance(deletion, bool)
         return cls(
             validate_base_url(
                 base_url
@@ -104,12 +115,30 @@ class Settings:
             ),
             model or os.getenv("SPIRITLM_MODEL") or values.get("model"),
             "NO_COLOR" not in os.environ and values.get("color", True),
+            "standard" if invalid else mode,
+            True if invalid else deletion,
+            invalid,
         )
 
     def save_model(self, model: str) -> None:
+        self._save(model=model)
+
+    def save_permissions(self, mode: PermissionMode, confirm_deletion: bool) -> None:
+        self._save(permission_mode=mode, confirm_deletion=confirm_deletion)
+        self.permissions_warning = False
+
+    def _save(
+        self,
+        *,
+        model: str | None = None,
+        permission_mode: PermissionMode | None = None,
+        confirm_deletion: bool | None = None,
+    ) -> None:
         import json
 
-        self.model = model
+        model = model if model is not None else self.model
+        mode = permission_mode if permission_mode is not None else self.permission_mode
+        deletion = confirm_deletion if confirm_deletion is not None else self.confirm_deletion
         path = config_path()
         path.parent.mkdir(parents=True, exist_ok=True)
         # Keep automatic environment selection active after changing models.
@@ -121,7 +150,12 @@ class Settings:
         # JSON quoted strings are compatible with TOML basic strings here.
         path.write_text(
             server_config
-            + f"model = {json.dumps(model, ensure_ascii=False)}\n"
-            f"color = {str(self.color).lower()}\n",
+            + (f"model = {json.dumps(model, ensure_ascii=False)}\n" if model else "")
+            + f"color = {str(self.color).lower()}\n"
+            + f"permission_mode = {json.dumps(mode)}\n"
+            + f"confirm_deletion = {str(deletion).lower()}\n",
             encoding="utf-8",
         )
+        self.model = model
+        self.permission_mode = mode
+        self.confirm_deletion = deletion

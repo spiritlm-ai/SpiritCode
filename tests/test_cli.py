@@ -378,3 +378,45 @@ async def test_header_precedes_first_login_prompt(tmp_path, monkeypatch):
         credentials.return_value.get.return_value = None
         with pytest.raises(EOFError):
             await run(Namespace(base_url=None, model=None, command=None))
+
+
+@pytest.mark.parametrize("command", ["/permission", "/permissions"])
+async def test_permission_command_preserved_across_model_and_sessions(
+    tmp_path, monkeypatch, command
+):
+    from spiritcode.store import new_session
+
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr("spiritcode.config.config_path", lambda: tmp_path / "config.toml")
+    settings = Settings()
+    client = Client(settings, "test")
+    client.models = AsyncMock(return_value=[Model(id="test")])
+    store = Store(tmp_path / "sessions.db")
+    previous = new_session(tmp_path, "test")
+    store.save(previous)
+    ui, _ = captured_ui()
+    ui.ask = AsyncMock(
+        side_effect=[command, "/model test", "/new", "/resume " + previous["id"], "/exit"]
+    )
+    ui.choose_permissions = AsyncMock(return_value=("unrestricted", False))
+    from spiritcode.cli import Tools as RealTools
+
+    instances = []
+
+    def make_tools(*args):
+        tool = RealTools(*args)
+        instances.append(tool)
+        return tool
+
+    try:
+        with patch("spiritcode.cli.Tools", side_effect=make_tools):
+            await interactive(client, settings, ui, store)
+        assert len(instances) == 3
+        assert all(tool.settings is settings for tool in instances)
+        assert settings.permission_mode == "unrestricted"
+        assert not settings.confirm_deletion
+        assert Settings.load().permission_mode == "unrestricted"
+        assert not Settings.load().confirm_deletion
+    finally:
+        await client.close()
+        store.close()

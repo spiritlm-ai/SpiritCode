@@ -87,8 +87,8 @@ async def test_agent_finds_reads_edits_runs_and_finishes_without_at(tmp_path):
     client = Client(Settings(), "test", httpx.MockTransport(handler))
     store, ui = Store(tmp_path / "sessions.db"), AgentUI()
     session = new_session(tmp_path, "test")
-    tools = Tools(tmp_path, ui, session["snapshots"])
-    agent = Agent(client, Model(id="test", tool_calling=True), session, store, tools, ui)
+    tools = Tools(tmp_path, ui, session["snapshots"], Settings(permission_mode="full"))
+    agent = Agent(client, Model(id="test"), session, store, tools, ui)
     try:
         await agent.turn("Исправь answer на 2 и проверь")
         assert (tmp_path / "app.py").read_text() == "answer = 2\n"
@@ -114,7 +114,12 @@ async def test_chat_only_model_never_gets_tools(tmp_path):
     store, ui = Store(tmp_path / "sessions.db"), AgentUI()
     session = new_session(tmp_path, "test")
     agent = Agent(
-        client, Model(id="test"), session, store, Tools(tmp_path, ui, session["snapshots"]), ui
+        client,
+        Model(id="test", tool_calling=False),
+        session,
+        store,
+        Tools(tmp_path, ui, session["snapshots"]),
+        ui,
     )
     await agent.turn("Привет")
     assert "tools" not in requests[0]
@@ -258,7 +263,12 @@ async def test_explicit_attachment_and_model_switch_keep_conversation(tmp_path):
     store, ui = Store(tmp_path / "sessions.db"), AgentUI()
     session = new_session(tmp_path, "first")
     agent = Agent(
-        client, Model(id="first"), session, store, Tools(tmp_path, ui, session["snapshots"]), ui
+        client,
+        Model(id="first", tool_calling=False),
+        session,
+        store,
+        Tools(tmp_path, ui, session["snapshots"]),
+        ui,
     )
     await agent.turn("Проверь @context.txt")
     assert "данные файла" in requests[0]["messages"][-1]["content"]
@@ -341,6 +351,29 @@ async def test_failed_and_interrupted_requests_keep_diagnostics(tmp_path):
         assert diagnostic["status"] == "cancelled"
         assert diagnostic["usage"]["total_tokens"] == 3
         assert diagnostic["request_id"] == "interrupted-request"
+    finally:
+        await client.close()
+        store.close()
+
+
+async def test_tool_rejection_explained_without_retry(tmp_path):
+    requests = []
+
+    def handler(request):
+        requests.append(json.loads(request.content))
+        return httpx.Response(400, json={"error": "private upstream response"})
+
+    client = Client(Settings(), "test", httpx.MockTransport(handler))
+    store, ui = Store(tmp_path / "sessions.db"), AgentUI()
+    session = new_session(tmp_path, "test")
+    agent = Agent(client, Model(id="test"), session, store, Tools(tmp_path, ui, []), ui)
+    try:
+        with pytest.raises(ApiError, match="/model") as error:
+            await agent.turn("Проверь проект")
+        assert "private" not in str(error.value)
+        assert len(requests) == 1
+        assert "tools" in requests[0]
+        assert session["diagnostics"][-1]["status"] == "error"
     finally:
         await client.close()
         store.close()
