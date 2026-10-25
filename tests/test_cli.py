@@ -380,10 +380,7 @@ async def test_header_precedes_first_login_prompt(tmp_path, monkeypatch):
             await run(Namespace(base_url=None, model=None, command=None))
 
 
-@pytest.mark.parametrize("command", ["/permission", "/permissions"])
-async def test_permission_command_preserved_across_model_and_sessions(
-    tmp_path, monkeypatch, command
-):
+async def test_permission_command_preserved_across_model_and_sessions(tmp_path, monkeypatch):
     from spiritcode.store import new_session
 
     monkeypatch.chdir(tmp_path)
@@ -396,7 +393,7 @@ async def test_permission_command_preserved_across_model_and_sessions(
     store.save(previous)
     ui, _ = captured_ui()
     ui.ask = AsyncMock(
-        side_effect=[command, "/model test", "/new", "/resume " + previous["id"], "/exit"]
+        side_effect=["/permissions", "/model test", "/new", "/resume " + previous["id"], "/exit"]
     )
     ui.choose_permissions = AsyncMock(return_value=("unrestricted", False))
     from spiritcode.cli import Tools as RealTools
@@ -417,6 +414,30 @@ async def test_permission_command_preserved_across_model_and_sessions(
         assert not settings.confirm_deletion
         assert Settings.load().permission_mode == "unrestricted"
         assert not Settings.load().confirm_deletion
+    finally:
+        await client.close()
+        store.close()
+
+
+async def test_context_uses_haiku_window_from_resolved_model(tmp_path):
+    from spiritcode.store import new_session
+
+    def handler(request):
+        item = {"id": "anthropic/claude-haiku-5.5", "context_window": None}
+        return httpx.Response(200, json={"data": [item]})
+
+    client = Client(Settings(), "test", httpx.MockTransport(handler))
+    store = Store(tmp_path / "sessions.db")
+    ui, output = captured_ui()
+    try:
+        model = (await client.models())[0]
+        session = new_session(tmp_path, model.id)
+        agent = Agent(client, model, session, store, Tools(tmp_path, ui, []), ui)
+        await show_context(session, agent, ui)
+        text = output.getvalue()
+        assert "1000000" in text
+        assert "/ 995904 токенов" in text
+        assert "резервного окна" not in text
     finally:
         await client.close()
         store.close()

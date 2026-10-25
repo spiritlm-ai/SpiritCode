@@ -76,7 +76,7 @@ async def test_extended_keys_work_in_chat_and_restore_keyboard_protocol():
         )
         pipe.send_text("\x1b[57410uhelp\r")
         assert await ui.ask(chat=True, completer=DummyCompleter()) == "/help"
-        write_raw.assert_any_call("\x1b[>1u")
+        write_raw.assert_any_call("\x1b[>5u")
         write_raw.assert_any_call("\x1b[<u")
         pipe.send_text("text\x1b[99;5u")
         with pytest.raises(KeyboardInterrupt):
@@ -312,11 +312,21 @@ def test_slash_palette_descriptions_arguments_and_plain_prose(tmp_path, monkeypa
     assert [entry.text for entry in completions("/model DEEP")] == ["provider/deep"]
     assert [entry.text for entry in completions("/resume saved")] == ["saved-session"]
     assert [entry.text for entry in completions("/usage 3")] == ["30d"]
+    assert not completions("")
     assert not completions("Привет")
+    for text, cursor in [("/con объясни это", 4), ("/con\nещё текст", 4), ("/con\n", 5)]:
+        assert not list(
+            completer.get_completions(Document(text, cursor_position=cursor), CompleteEvent())
+        )
     assert not completions("/unknown ")
     assert not completions("/context")
     assert not completions("/usage 30d")
     assert all(command.name in help_text() for command in COMMANDS)
+    assert [entry.text for entry in completions("/perm")] == ["/permissions"]
+    assert "/permission —" not in help_text()
+    from spiritcode.config import PERMISSION_MODES
+
+    assert PERMISSION_MODES == ("full", "standard", "unrestricted")
     monkeypatch.chdir(tmp_path)
     (tmp_path / "hello.txt").write_text("test")
     assert completions("Посмотри @hel")[0].text == "lo.txt"
@@ -368,12 +378,7 @@ async def test_palette_enter_accepts_without_submitting_and_escape_dismisses():
             pipe.send_text("\x7f")
             await wait_for(lambda: buffer.text == "/mo" and buffer.complete_state is not None)
             pipe.send_text("\x15")
-            await wait_for(lambda: buffer.text == "" and buffer.complete_state is not None)
-            from spiritcode.commands import COMMANDS
-
-            assert [entry.text for entry in buffer.complete_state.completions] == [
-                command.name for command in COMMANDS
-            ]
+            await wait_for(lambda: buffer.text == "" and buffer.complete_state is None)
             pipe.send_text("/mod")
             await wait_for(lambda: buffer.text == "/mod" and buffer.complete_state is not None)
             pipe.send_text("\x1b")

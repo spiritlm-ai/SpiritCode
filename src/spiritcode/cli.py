@@ -273,7 +273,7 @@ async def interactive(
                 break
             if command == "/help":
                 ui.say(help_text())
-            elif command in {"/permission", "/permissions"}:
+            elif command == "/permissions":
                 choice = await ui.choose_permissions(settings)
                 if choice is not None:
                     settings.save_permissions(*choice)

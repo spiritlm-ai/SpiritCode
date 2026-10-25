@@ -174,3 +174,43 @@ async def test_total_stream_timeout_never_retries(monkeypatch):
         _ = [event async for event in client.stream({})]
     assert len(calls) == 1
     await client.close()
+
+
+@pytest.mark.parametrize("metadata_status", [200, 404])
+async def test_haiku_context_window_when_server_metadata_is_unknown(metadata_status):
+    def handler(request):
+        item = {"id": "anthropic/claude-haiku-5.5", "context_window": None}
+        if request.url.path == "/v1/models":
+            return httpx.Response(200, json={"data": [item]})
+        return httpx.Response(metadata_status, json={"data": [item]})
+
+    client = Client(Settings(), "test", httpx.MockTransport(handler))
+    try:
+        model = (await client.models())[0]
+        assert model.context_window == 1_000_000
+        from spiritcode.context import input_budget
+
+        assert input_budget(model.context_window, 4096) == 995_904
+    finally:
+        await client.close()
+
+
+async def test_server_context_window_overrides_configured_default():
+    def handler(request):
+        return httpx.Response(
+            200,
+            json={
+                "data": [
+                    {
+                        "id": "anthropic/claude-haiku-5.5",
+                        "context_window": 800_000,
+                    }
+                ]
+            },
+        )
+
+    client = Client(Settings(), "test", httpx.MockTransport(handler))
+    try:
+        assert (await client.models())[0].context_window == 800_000
+    finally:
+        await client.close()

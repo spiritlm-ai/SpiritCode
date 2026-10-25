@@ -56,7 +56,7 @@ class InputCompleter(Completer):
 
     def get_completions(self, document: Document, complete_event: Any) -> Iterable[Completion]:
         text = document.text_before_cursor
-        if not document.text or text.startswith("/"):
+        if document.is_cursor_at_the_end and re.fullmatch(r"/[^\s/]*(?: [^\s]*)?", document.text):
             command, separator, argument = text.partition(" ")
             if not separator:
                 for item in COMMANDS:
@@ -327,7 +327,7 @@ class UI:
             extended_keyboard = prepare_keyboard(self.prompt.app.input) and chat
             output = self.prompt.app.output
             if extended_keyboard:
-                output.write_raw("\x1b[>1u")
+                output.write_raw("\x1b[>5u")
                 output.flush()
             try:
                 result = await self.prompt.prompt_async(
@@ -363,11 +363,11 @@ class UI:
         if self.prompt is None:
             self.notice("Настройки не изменены", "Нужен интерактивный терминал.", "warning")
             return None
-        labels = ("Стандартная защита", "Без защиты", "Полная защита")
+        labels = ("Полная защита", "Стандартная защита", "Без защиты")
         details = (
+            "Каждая shell-команда требует разрешения. Точечные правки автоматические.",
             "Git, удаление, перезапись и непрозрачные команды требуют разрешения.",
             "Команды выполняются автоматически с учётом чекбокса удаления.",
-            "Каждая shell-команда требует разрешения. Точечные правки автоматические.",
         )
         selected = PERMISSION_MODES.index(settings.permission_mode)
         deletion = settings.confirm_deletion
@@ -386,7 +386,7 @@ class UI:
         @keys.add(" ")
         def toggle(event: Any) -> None:
             nonlocal deletion
-            if selected == 1:
+            if PERMISSION_MODES[selected] == "unrestricted":
                 deletion = not deletion
 
         @keys.add("enter")
@@ -409,7 +409,7 @@ class UI:
                     )
                 )
             rows.append(("", "\n" + details[selected] + "\n"))
-            if selected == 1:
+            if PERMISSION_MODES[selected] == "unrestricted":
                 rows.append(("", ("[x]" if deletion else "[ ]") + " Спрашивать перед удалением\n"))
             rows.append(
                 (

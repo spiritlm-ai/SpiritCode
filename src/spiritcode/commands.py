@@ -24,8 +24,7 @@ COMMANDS = (
     Command("/compact", "Сжать контекст отдельным оплачиваемым запросом"),
     Command("/diff", "Посмотреть правки сессии"),
     Command("/undo", "Отменить последнюю группу правок"),
-    Command("/permission", "Выбрать режим разрешений"),
-    Command("/permissions", "Выбрать режим разрешений (алиас)"),
+    Command("/permissions", "Выбрать режим разрешений"),
     Command("/exit", "Завершить SpiritCode"),
 )
 

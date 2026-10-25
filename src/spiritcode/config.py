@@ -46,6 +46,11 @@ MAX_FILE_BYTES = 128_000
 MAX_RESULT_CHARS = 24_000
 MAX_FILES = 2_000
 MAX_SSE_EVENT = 1_048_576
+# Deployment context window confirmed by the product owner. Server metadata takes precedence.
+MODEL_CONTEXT_WINDOWS = {
+    "anthropic/claude-haiku-5.5": 1_000_000,
+    "claude-haiku-5.5": 1_000_000,
+}
 FALLBACK_CONTEXT = 16_000
 DEFAULT_OUTPUT_TOKENS = 4_096
 COMPACTION_THRESHOLD = 0.75
@@ -85,7 +90,7 @@ def validate_base_url(value: str) -> str:
 
 
 PermissionMode = Literal["standard", "unrestricted", "full"]
-PERMISSION_MODES: tuple[PermissionMode, ...] = ("standard", "unrestricted", "full")
+PERMISSION_MODES: tuple[PermissionMode, ...] = ("full", "standard", "unrestricted")
 
 
 @dataclass

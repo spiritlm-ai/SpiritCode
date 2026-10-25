@@ -6,7 +6,7 @@ from typing import Any
 import httpx
 from pydantic import BaseModel, ConfigDict, Field
 
-from spiritcode.config import MAX_SSE_EVENT, REQUEST_TIMEOUT, Settings
+from spiritcode.config import MAX_SSE_EVENT, MODEL_CONTEXT_WINDOWS, REQUEST_TIMEOUT, Settings
 
 
 class ApiError(Exception):
@@ -99,7 +99,20 @@ class Client:
             if exc.status not in {404, 501}:
                 raise
             metadata = {}
-        return [Model.model_validate({**m.model_dump(), **metadata.get(m.id, {})}) for m in models]
+        resolved = []
+        for model in models:
+            values = {
+                **model.model_dump(),
+                **{
+                    key: value
+                    for key, value in metadata.get(model.id, {}).items()
+                    if value is not None
+                },
+            }
+            if values["context_window"] is None:
+                values["context_window"] = MODEL_CONTEXT_WINDOWS.get(model.id)
+            resolved.append(Model.model_validate(values))
+        return resolved
 
     async def stream(self, payload: dict[str, Any]) -> AsyncIterator[dict[str, Any]]:
         """HTTPX incrementally decodes UTF-8 and normalizes CRLF in aiter_lines."""

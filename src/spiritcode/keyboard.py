@@ -8,7 +8,17 @@ from prompt_toolkit.input.vt100_parser import Vt100Parser
 from prompt_toolkit.key_binding import KeyPress
 from prompt_toolkit.keys import Keys
 
-CSI_KEY = re.compile(r"\x1b\[(\d+)(?:;(\d+))?u\Z")
+CSI_KEY = re.compile(
+    r"\x1b\[(?P<codepoint>\d+)"
+    r"(?::(?P<shifted>\d*)(?::(?P<base>\d+))?)?"
+    r"(?:;(?P<modifiers>\d+)(?::(?P<event>[123]))?)?u\Z"
+)
+CSI_PREFIX = re.compile(r"\x1b(?:\[[\d:;]*)?\Z")
+# Used only for modified keys when the terminal omits the physical base-layout key.
+RUSSIAN_KEYS = str.maketrans(
+    "йцукенгшщзхъфывапролджэячсмитьбюё",
+    "qwertyuiop[]asdfghjkl;'zxcvbnm,.`",
+)
 KEYPAD_TEXT = {
     **{57399 + digit: str(digit) for digit in range(10)},
     57409: ".",
@@ -39,6 +49,32 @@ class ParserInput(Protocol):
 
 
 class KeyboardParser(Vt100Parser):
+    def reset(self, request: bool = False) -> None:
+        self._pending_csi = ""
+        super().reset(request)
+
+    def feed(self, data: str) -> None:
+        # prompt-toolkit's legacy parser does not retain CSI prefixes with colons.
+        # Buffer these before decoding, including packets split between reads.
+        for character in data:
+            if not self._in_bracketed_paste and (self._pending_csi or character == "\x1b"):
+                self._pending_csi += character
+                if CSI_PREFIX.fullmatch(self._pending_csi):
+                    continue
+                sequence, self._pending_csi = self._pending_csi, ""
+                if CSI_KEY.fullmatch(sequence):
+                    self._call_handler(Keys.Any, sequence)
+                else:
+                    super().feed(sequence)
+            else:
+                super().feed(character)
+
+    def flush(self) -> None:
+        sequence, self._pending_csi = self._pending_csi, ""
+        if sequence:
+            super().feed(sequence)
+        super().flush()
+
     def _get_match(self, prefix: str) -> Keys | tuple[Keys, ...] | None:
         if CSI_KEY.fullmatch(prefix):
             return Keys.Any
@@ -49,9 +85,20 @@ class KeyboardParser(Vt100Parser):
         if key != Keys.Any or match is None:
             super()._call_handler(key, insert_text)
             return
-        codepoint = int(match[1])
-        modifiers = int(match[2] or "1") - 1
+        if match["event"] == "3":
+            return
+        codepoint = int(match["codepoint"])
+        modifiers = int(match["modifiers"] or "1") - 1
         shift, alt, control = bool(modifiers & 1), bool(modifiers & 2), bool(modifiers & 4)
+        if control or alt:
+            if match["base"]:
+                codepoint = int(match["base"])
+            elif codepoint <= 0x10FFFF:
+                normalized = chr(codepoint).lower().translate(RUSSIAN_KEYS)
+                if len(normalized) == 1:
+                    codepoint = ord(normalized)
+        elif shift and match["shifted"]:
+            codepoint = int(match["shifted"])
         decoded: str | Keys
         text = ""
         if codepoint == 13:
