@@ -2,7 +2,7 @@
 
 Терминальный кодинг-агент для SpiritLM. Python 3.12+, Linux, macOS и Windows.
 
-![Интерфейс SpiritCode в терминале](image.png)
+![Интерфейс SpiritCode в терминале](images/cli.png)
 
 ## Установка
 

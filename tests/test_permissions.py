@@ -2,9 +2,9 @@ from unittest.mock import AsyncMock, patch
 
 import pytest
 
-from spiritcode.config import Settings
-from spiritcode.permissions import command_risk
-from spiritcode.tools import Tools
+from spiritcode.core.config import Settings
+from spiritcode.core.permissions import command_risk
+from spiritcode.tools.executor import Tools
 from tests.test_tools import FakeUI, call
 
 

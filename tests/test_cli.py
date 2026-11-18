@@ -6,13 +6,14 @@ import httpx
 import pytest
 from rich.console import Console
 
-from spiritcode.agent import Agent
-from spiritcode.api import ApiError, Client, Model
 from spiritcode.cli import account, interactive, load_account_label, model_rows, show_context
-from spiritcode.config import Settings
-from spiritcode.store import Store
-from spiritcode.tools import Tools
-from spiritcode.ui import UI
+from spiritcode.core.agent import Agent
+from spiritcode.core.api import ApiError, Client
+from spiritcode.core.config import Settings
+from spiritcode.core.models import Model
+from spiritcode.core.store import Store
+from spiritcode.tools.executor import Tools
+from spiritcode.ui.interface import UI
 from tests.test_agent import event, sse
 
 
@@ -180,7 +181,7 @@ def test_catalog_formats_prices_and_keeps_unknown_separate_from_zero():
 
 async def test_model_and_new_chat_reset_screen_without_losing_selected_model(tmp_path, monkeypatch):
     monkeypatch.chdir(tmp_path)
-    monkeypatch.setattr("spiritcode.config.config_path", lambda: tmp_path / "config.toml")
+    monkeypatch.setattr("spiritcode.core.config.config_path", lambda: tmp_path / "config.toml")
     client = Client(Settings(), "test")
     client.models = AsyncMock(return_value=[Model(id="test")])
     store = Store(tmp_path / "sessions.db")
@@ -226,7 +227,7 @@ async def test_chat_opens_without_catalog_and_requires_explicit_model(tmp_path, 
 
 async def test_model_selection_chat_and_context_are_separate(tmp_path, monkeypatch):
     monkeypatch.chdir(tmp_path)
-    monkeypatch.setattr("spiritcode.config.config_path", lambda: tmp_path / "config.toml")
+    monkeypatch.setattr("spiritcode.core.config.config_path", lambda: tmp_path / "config.toml")
     requests = []
 
     def handler(request):
@@ -381,10 +382,10 @@ async def test_header_precedes_first_login_prompt(tmp_path, monkeypatch):
 
 
 async def test_permission_command_preserved_across_model_and_sessions(tmp_path, monkeypatch):
-    from spiritcode.store import new_session
+    from spiritcode.core.store import new_session
 
     monkeypatch.chdir(tmp_path)
-    monkeypatch.setattr("spiritcode.config.config_path", lambda: tmp_path / "config.toml")
+    monkeypatch.setattr("spiritcode.core.config.config_path", lambda: tmp_path / "config.toml")
     settings = Settings()
     client = Client(settings, "test")
     client.models = AsyncMock(return_value=[Model(id="test")])
@@ -406,7 +407,10 @@ async def test_permission_command_preserved_across_model_and_sessions(tmp_path, 
         return tool
 
     try:
-        with patch("spiritcode.cli.Tools", side_effect=make_tools):
+        with (
+            patch("spiritcode.cli.Tools", side_effect=make_tools),
+            patch("spiritcode.commands.sessions.Tools", side_effect=make_tools),
+        ):
             await interactive(client, settings, ui, store)
         assert len(instances) == 3
         assert all(tool.settings is settings for tool in instances)
@@ -420,7 +424,7 @@ async def test_permission_command_preserved_across_model_and_sessions(tmp_path, 
 
 
 async def test_context_uses_haiku_window_from_resolved_model(tmp_path):
-    from spiritcode.store import new_session
+    from spiritcode.core.store import new_session
 
     def handler(request):
         item = {"id": "anthropic/claude-haiku-5.5", "context_window": None}

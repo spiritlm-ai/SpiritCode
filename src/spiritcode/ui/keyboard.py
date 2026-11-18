@@ -13,12 +13,15 @@ CSI_KEY = re.compile(
     r"(?::(?P<shifted>\d*)(?::(?P<base>\d+))?)?"
     r"(?:;(?P<modifiers>\d+)(?::(?P<event>[123]))?)?u\Z"
 )
+
 CSI_PREFIX = re.compile(r"\x1b(?:\[[\d:;]*)?\Z")
+
 # Used only for modified keys when the terminal omits the physical base-layout key.
 RUSSIAN_KEYS = str.maketrans(
     "йцукенгшщзхъфывапролджэячсмитьбюё",
     "qwertyuiop[]asdfghjkl;'zxcvbnm,.`",
 )
+
 KEYPAD_TEXT = {
     **{57399 + digit: str(digit) for digit in range(10)},
     57409: ".",
@@ -29,6 +32,7 @@ KEYPAD_TEXT = {
     57415: "=",
     57416: ",",
 }
+
 KEYPAD_KEYS = {
     57414: Keys.ControlM,
     57417: Keys.Left,
@@ -42,6 +46,10 @@ KEYPAD_KEYS = {
     57425: Keys.Insert,
     57426: Keys.Delete,
 }
+
+# CSI-u (Kitty) and xterm modifyOtherKeys encode Shift+Enter separately from Enter.
+for sequence in ("\x1b[13;2u", "\x1b[27;2;13~", "\x1b[13;2~"):
+    ANSI_SEQUENCES[sequence] = Keys.ControlO
 
 
 class ParserInput(Protocol):
@@ -61,6 +69,7 @@ class KeyboardParser(Vt100Parser):
                 self._pending_csi += character
                 if CSI_PREFIX.fullmatch(self._pending_csi):
                     continue
+
                 sequence, self._pending_csi = self._pending_csi, ""
                 if CSI_KEY.fullmatch(sequence):
                     self._call_handler(Keys.Any, sequence)
@@ -87,9 +96,11 @@ class KeyboardParser(Vt100Parser):
             return
         if match["event"] == "3":
             return
+
         codepoint = int(match["codepoint"])
         modifiers = int(match["modifiers"] or "1") - 1
         shift, alt, control = bool(modifiers & 1), bool(modifiers & 2), bool(modifiers & 4)
+
         if control or alt:
             if match["base"]:
                 codepoint = int(match["base"])
@@ -99,6 +110,7 @@ class KeyboardParser(Vt100Parser):
                     codepoint = ord(normalized)
         elif shift and match["shifted"]:
             codepoint = int(match["shifted"])
+
         decoded: str | Keys
         text = ""
         if codepoint == 13:
@@ -124,6 +136,7 @@ class KeyboardParser(Vt100Parser):
                 text = "\x7f"
             elif shift and text.isascii() and text.isalpha():
                 text = text.upper()
+
             mapped = ANSI_SEQUENCES.get(text)
             if isinstance(mapped, Keys):
                 decoded = mapped
@@ -131,6 +144,7 @@ class KeyboardParser(Vt100Parser):
                 decoded = text
             else:
                 return
+
         if alt:
             self.feed_key_callback(KeyPress(Keys.Escape, "\x1b"))
         self.feed_key_callback(KeyPress(decoded, text))

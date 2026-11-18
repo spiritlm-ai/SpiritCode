@@ -3,11 +3,12 @@ import json
 import httpx
 import pytest
 
-from spiritcode.agent import Agent
-from spiritcode.api import ApiError, Client, Model
-from spiritcode.config import Settings
-from spiritcode.store import Store, new_session
-from spiritcode.tools import Tools
+from spiritcode.core.agent import Agent
+from spiritcode.core.api import ApiError, Client
+from spiritcode.core.config import Settings
+from spiritcode.core.models import Model
+from spiritcode.core.store import Store, new_session
+from spiritcode.tools.executor import Tools
 from tests.test_tools import FakeUI
 
 

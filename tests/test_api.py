@@ -3,8 +3,8 @@ import asyncio
 import httpx
 import pytest
 
-from spiritcode.api import ApiError, Client
-from spiritcode.config import Settings, validate_base_url
+from spiritcode.core.api import ApiError, Client
+from spiritcode.core.config import Settings, validate_base_url
 
 
 class Chunks(httpx.AsyncByteStream):
@@ -157,7 +157,7 @@ async def test_metadata_is_confirmed_not_inferred():
 
 
 async def test_total_stream_timeout_never_retries(monkeypatch):
-    monkeypatch.setattr("spiritcode.api.REQUEST_TIMEOUT", 0.01)
+    monkeypatch.setattr("spiritcode.core.api.REQUEST_TIMEOUT", 0.01)
     calls = []
 
     class Waiting(httpx.AsyncByteStream):
@@ -188,7 +188,7 @@ async def test_haiku_context_window_when_server_metadata_is_unknown(metadata_sta
     try:
         model = (await client.models())[0]
         assert model.context_window == 1_000_000
-        from spiritcode.context import input_budget
+        from spiritcode.core.context import input_budget
 
         assert input_budget(model.context_window, 4096) == 995_904
     finally:

@@ -4,9 +4,10 @@ from collections.abc import AsyncIterator
 from typing import Any
 
 import httpx
-from pydantic import BaseModel, ConfigDict, Field
 
-from spiritcode.config import MAX_SSE_EVENT, MODEL_CONTEXT_WINDOWS, REQUEST_TIMEOUT, Settings
+from spiritcode.constants import MAX_SSE_EVENT, MODEL_CONTEXT_WINDOWS, REQUEST_TIMEOUT
+from spiritcode.core.config import Settings
+from spiritcode.core.models import Model, StreamEvent
 
 
 class ApiError(Exception):
@@ -14,37 +15,6 @@ class ApiError(Exception):
         super().__init__(message)
         self.status = status
         self.request_id = request_id
-
-
-class Model(BaseModel):
-    model_config = ConfigDict(extra="ignore")
-    id: str
-    tool_calling: bool | None = Field(default=None, strict=True)
-    context_window: int | None = Field(default=None, gt=0)
-    max_output_tokens: int | None = Field(default=None, gt=0)
-    price_per_million_tokens: str | None = None
-    sample_price: bool = True
-
-
-class ToolFragment(BaseModel):
-    index: int = Field(strict=True, ge=0, le=127)
-    id: str | None = None
-    function: dict[str, str | None] = Field(default_factory=dict)
-
-
-class Delta(BaseModel):
-    content: str | None = None
-    tool_calls: list[ToolFragment] = Field(default_factory=list)
-
-
-class Choice(BaseModel):
-    delta: Delta = Field(default_factory=Delta)
-    finish_reason: str | None = None
-
-
-class StreamEvent(BaseModel):
-    choices: list[Choice] = Field(default_factory=list)
-    usage: dict[str, Any] | None = None
 
 
 class Client:
@@ -68,6 +38,7 @@ class Client:
         self.request_id = response.headers.get("x-request-id")
         if response.is_success:
             return
+
         messages = {
             401: "Неверный или отозванный API-ключ SpiritLM.",
             402: "Недостаточно средств или кредитов подписки SpiritLM.",
@@ -93,12 +64,14 @@ class Client:
     async def models(self) -> list[Model]:
         payload = await self.get("models")
         models = [Model.model_validate(item) for item in payload["data"]]
+
         try:
             metadata = {item["id"]: item for item in (await self.get("metadata"))["data"]}
         except ApiError as exc:
             if exc.status not in {404, 501}:
                 raise
             metadata = {}
+
         resolved = []
         for model in models:
             values = {
@@ -125,6 +98,7 @@ class Client:
                     json={**payload, "stream": True},
                 ) as response:
                     self.check(response)
+
                     data: list[str] = []
                     size = 0
                     async for line in response.aiter_lines():

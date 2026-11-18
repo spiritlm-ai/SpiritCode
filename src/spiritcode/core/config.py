@@ -1,61 +1,16 @@
-"""Developer defaults and centralized URL/settings handling."""
+"""Persisted user settings and central base URL handling."""
 
+import json
 import os
 import tomllib
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Literal
 from urllib.parse import urlsplit
 
 from platformdirs import user_config_path, user_data_path
 
-BASE_URL = "https://spiritlm.netlify.app"
-DEV_BASE_URL = "http://localhost:3000"
-API_PATHS = {
-    "models": "/v1/models",
-    "metadata": "/v1/spiritcode/models",
-    "chat": "/v1/chat/completions",
-    "profile": "/v1/account",
-    "balance": "/v1/account/balance",
-    "subscription": "/v1/account/subscription",
-    "usage": "/v1/account/usage",
-}
-COLORS = {
-    "accent": "#ffe02e",
-    "text": "#f3f2ee",
-    "muted": "#a5a5a1",
-    "line": "#30302e",
-    "success": "#8fca93",
-    "error": "#ff6b6b",
-    "info": "#91b9ff",
-}
-BACKGROUND = "#080808"
-STAR = r"""          .-.
-         /   \
-     .--'     '--.
-    /     | |     \
-    \             /
-     '--.     .--'
-         \   /
-          '-'"""
-REQUEST_TIMEOUT = 100
-ACCOUNT_TIMEOUT = 5
-COMMAND_TIMEOUT = 120
-MAX_ITERATIONS = 30
-MAX_FILE_BYTES = 128_000
-MAX_RESULT_CHARS = 24_000
-MAX_FILES = 2_000
-MAX_SSE_EVENT = 1_048_576
-# Deployment context window confirmed by the product owner. Server metadata takes precedence.
-MODEL_CONTEXT_WINDOWS = {
-    "anthropic/claude-haiku-5.5": 1_000_000,
-    "claude-haiku-5.5": 1_000_000,
-}
-FALLBACK_CONTEXT = 16_000
-DEFAULT_OUTPUT_TOKENS = 4_096
-COMPACTION_THRESHOLD = 0.75
-EXCLUDED = {".git", ".venv", "node_modules", "__pycache__", "dist", "build", ".next"}
-SECRET_NAMES = {".env", ".npmrc", ".pypirc", "id_rsa", "id_ed25519", "credentials"}
+from spiritcode.constants import API_PATHS, BASE_URL, DEV_BASE_URL
+from spiritcode.types import PERMISSION_MODES, PermissionMode
 
 
 def config_path() -> Path:
@@ -89,10 +44,6 @@ def validate_base_url(value: str) -> str:
     return value.rstrip("/")
 
 
-PermissionMode = Literal["standard", "unrestricted", "full"]
-PERMISSION_MODES: tuple[PermissionMode, ...] = ("full", "standard", "unrestricted")
-
-
 @dataclass
 class Settings:
     base_url: str = field(default_factory=default_base_url)
@@ -109,9 +60,11 @@ class Settings:
     def load(cls, base_url: str | None = None, model: str | None = None) -> "Settings":
         path = config_path()
         values = tomllib.loads(path.read_text("utf-8")) if path.exists() else {}
+
         mode = values.get("permission_mode", "standard")
         deletion = values.get("confirm_deletion", True)
         invalid = mode not in PERMISSION_MODES or not isinstance(deletion, bool)
+
         return cls(
             validate_base_url(
                 base_url
@@ -139,19 +92,19 @@ class Settings:
         permission_mode: PermissionMode | None = None,
         confirm_deletion: bool | None = None,
     ) -> None:
-        import json
-
         model = model if model is not None else self.model
         mode = permission_mode if permission_mode is not None else self.permission_mode
         deletion = confirm_deletion if confirm_deletion is not None else self.confirm_deletion
         path = config_path()
         path.parent.mkdir(parents=True, exist_ok=True)
+
         # Keep automatic environment selection active after changing models.
         server_config = (
             f"base_url = {json.dumps(self.base_url)}\n"
             if self.base_url != default_base_url()
             else ""
         )
+
         # JSON quoted strings are compatible with TOML basic strings here.
         path.write_text(
             server_config
@@ -161,6 +114,7 @@ class Settings:
             + f"confirm_deletion = {str(deletion).lower()}\n",
             encoding="utf-8",
         )
+
         self.model = model
         self.permission_mode = mode
         self.confirm_deletion = deletion

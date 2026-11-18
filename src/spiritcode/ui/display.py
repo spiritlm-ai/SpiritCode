@@ -6,6 +6,7 @@ from datetime import UTC, datetime
 from decimal import Decimal
 
 DECIMAL_TEXT = re.compile(r"-?\d+\.\d+\Z")
+
 AMOUNT_FIELDS = frozenset(
     {
         "balance",
@@ -47,7 +48,7 @@ ACCOUNT_LABELS = {
     "requestsPerMinute": "Запросов в минуту",
     "concurrentRequests": "Одновременных запросов",
     "running": "Активные запросы",
-    "recent": "Запросы за минуту",
+    "recent": "Запросы в минуту",
     "cost": "Расход RUB",
     "subscription_credits_used": "Использовано кредитов",
     "requests": "Запросы",
@@ -70,11 +71,13 @@ def _account_field_rows(
 ) -> list[tuple[str, str]]:
     label = "Название" if parent == "key" and field == "name" else ACCOUNT_LABELS.get(field, field)
     label = indent + label
+
     if isinstance(value, dict):
         rows = [(label, "")]
         for key, item in value.items():
             rows.extend(_account_field_rows(key, item, indent + "  ", field))
         return rows if value else [(label, "нет данных")]
+
     if isinstance(value, list):
         if not value:
             return [
@@ -85,6 +88,7 @@ def _account_field_rows(
             entry = f"Период {index}" if field == "upcoming" else str(index)
             rows.extend(_account_field_rows(entry, item, indent + "  ", field))
         return rows
+
     if value is None:
         text = "нет активной подписки" if field == "current" else "нет данных"
     elif isinstance(value, bool):
@@ -101,6 +105,7 @@ def _account_field_rows(
         text = "Основной"
     else:
         text = str(format_account_value(value, field))
+
     return [(label, text)]
 
 

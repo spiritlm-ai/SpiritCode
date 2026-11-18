@@ -5,13 +5,13 @@ import pytest
 from prompt_toolkit.history import DummyHistory
 from rich.console import Console
 
-from spiritcode.ui import UI
+from spiritcode.ui.interface import UI
 
 
 def test_extended_insert_and_ctrl_c_are_keys_instead_of_literal_sequences():
     from prompt_toolkit.keys import Keys
 
-    from spiritcode.keyboard import KeyboardParser
+    from spiritcode.ui.keyboard import KeyboardParser
 
     keys = []
     parser = KeyboardParser(keys.append)
@@ -23,7 +23,7 @@ def test_extended_insert_and_ctrl_c_are_keys_instead_of_literal_sequences():
 def test_extended_keyboard_decodes_escape_editing_keys_and_keeps_paste_literal():
     from prompt_toolkit.keys import Keys
 
-    from spiritcode.keyboard import KeyboardParser
+    from spiritcode.ui.keyboard import KeyboardParser
 
     keys = []
     parser = KeyboardParser(keys.append)
@@ -66,7 +66,7 @@ async def test_extended_keys_work_in_chat_and_restore_keyboard_protocol():
     from prompt_toolkit.input import create_pipe_input
     from prompt_toolkit.output import DummyOutput
 
-    from spiritcode.ui import input_bindings
+    from spiritcode.ui.interface import input_bindings
 
     ui = UI(color=False)
     output = DummyOutput()
@@ -231,7 +231,7 @@ async def test_shift_enter_inserts_newline_and_enter_submits(newline):
     from prompt_toolkit.input import create_pipe_input
     from prompt_toolkit.output import DummyOutput
 
-    from spiritcode.ui import input_bindings
+    from spiritcode.ui.interface import input_bindings
 
     ui = UI(color=False)
     with create_pipe_input() as pipe:
@@ -285,7 +285,7 @@ async def test_password_never_enters_conversation_input_history():
     ui.prompt = conversation_prompt
     password_prompt = MagicMock()
     password_prompt.prompt_async = AsyncMock(return_value="private-key")
-    with patch("spiritcode.ui.PromptSession", return_value=password_prompt) as factory:
+    with patch("spiritcode.ui.interface.PromptSession", return_value=password_prompt) as factory:
         assert await ui.ask("Ключ: ", secret=True) == "private-key"
         assert isinstance(factory.call_args.kwargs["history"], DummyHistory)
     conversation_prompt.prompt_async.assert_not_called()
@@ -295,8 +295,8 @@ def test_slash_palette_descriptions_arguments_and_plain_prose(tmp_path, monkeypa
     from prompt_toolkit.completion import CompleteEvent
     from prompt_toolkit.document import Document
 
-    from spiritcode.commands import COMMANDS, help_text
-    from spiritcode.ui import InputCompleter
+    from spiritcode.ui.commands import COMMANDS, help_text
+    from spiritcode.ui.interface import InputCompleter
 
     completer = InputCompleter()
     completer.models = ["provider/fast", "provider/deep"]
@@ -324,7 +324,7 @@ def test_slash_palette_descriptions_arguments_and_plain_prose(tmp_path, monkeypa
     assert all(command.name in help_text() for command in COMMANDS)
     assert [entry.text for entry in completions("/perm")] == ["/permissions"]
     assert "/permission —" not in help_text()
-    from spiritcode.config import PERMISSION_MODES
+    from spiritcode.types import PERMISSION_MODES
 
     assert PERMISSION_MODES == ("full", "standard", "unrestricted")
     monkeypatch.chdir(tmp_path)
@@ -344,7 +344,7 @@ async def test_palette_enter_accepts_without_submitting_and_escape_dismisses():
     from prompt_toolkit.input import create_pipe_input
     from prompt_toolkit.output import DummyOutput
 
-    from spiritcode.ui import input_bindings
+    from spiritcode.ui.interface import input_bindings
 
     ui = UI(color=False)
     with create_pipe_input() as pipe:
@@ -411,7 +411,7 @@ async def test_permission_menu_keyboard_and_cancel(keys, expected):
     from prompt_toolkit.input import create_pipe_input
     from prompt_toolkit.output import DummyOutput
 
-    from spiritcode.config import Settings
+    from spiritcode.core.config import Settings
 
     ui = UI(color=False)
     settings = Settings()
@@ -425,7 +425,7 @@ async def test_permission_menu_keyboard_and_cancel(keys, expected):
 
 
 async def test_permission_menu_without_terminal_preserves_settings():
-    from spiritcode.config import Settings
+    from spiritcode.core.config import Settings
 
     ui = UI(color=False)
     ui.prompt = None

@@ -1,9 +1,10 @@
+import getpass
 import os
 import re
 import sys
 from collections.abc import Iterable
 from pathlib import Path
-from typing import Any, Literal
+from typing import Any
 
 from prompt_toolkit import PromptSession
 from prompt_toolkit.application import Application
@@ -13,10 +14,8 @@ from prompt_toolkit.document import Document
 from prompt_toolkit.filters import Condition, has_completions, is_done
 from prompt_toolkit.formatted_text import StyleAndTextTuples
 from prompt_toolkit.history import DummyHistory
-from prompt_toolkit.input.ansi_escape_sequences import ANSI_SEQUENCES
 from prompt_toolkit.key_binding import KeyBindings
-from prompt_toolkit.keys import Keys
-from prompt_toolkit.layout import ConditionalContainer, HSplit, VSplit, Window
+from prompt_toolkit.layout import ConditionalContainer, HSplit, Layout, VSplit, Window
 from prompt_toolkit.layout.containers import WindowAlign
 from prompt_toolkit.layout.controls import FormattedTextControl
 from prompt_toolkit.output import ColorDepth
@@ -31,22 +30,12 @@ from rich.syntax import Syntax
 from rich.table import Table
 from rich.text import Text
 
-from spiritcode.commands import COMMANDS
-from spiritcode.config import COLORS, PERMISSION_MODES, STAR, PermissionMode, Settings
-from spiritcode.keyboard import prepare_keyboard
-
-ANSI = re.compile(r"\x1b(?:\][^\x07\x1b]*(?:\x07|\x1b\\)|\[[0-?]*[ -/]*[@-~]|[@-_])")
-CONTROLS = re.compile(r"[\x00-\x08\x0b-\x1f\x7f-\x9f\u202a-\u202e\u2066-\u2069]")
-KEY = re.compile(r"sk-spiritlm-[A-Za-z0-9_-]+")
-NoticeKind = Literal["info", "warning", "error", "success"]
-
-# CSI-u (Kitty) and xterm modifyOtherKeys encode Shift+Enter separately from Enter.
-for sequence in ("\x1b[13;2u", "\x1b[27;2;13~", "\x1b[13;2~"):
-    ANSI_SEQUENCES[sequence] = Keys.ControlO
-
-
-def clean(value: str) -> str:
-    return CONTROLS.sub("", ANSI.sub("", KEY.sub("[ключ скрыт]", value)))
+from spiritcode.constants import COLORS, STAR
+from spiritcode.core.config import Settings
+from spiritcode.sanitize import clean
+from spiritcode.types import PERMISSION_MODES, NoticeKind, PermissionMode
+from spiritcode.ui.commands import COMMANDS
+from spiritcode.ui.keyboard import prepare_keyboard
 
 
 class InputCompleter(Completer):
@@ -67,6 +56,7 @@ class InputCompleter(Completer):
                             display_meta=item.description,
                         )
                 return
+
             candidates: list[tuple[str, str]] = []
             if command == "/model":
                 candidates = [(model, "Модель SpiritLM") for model in self.models]
@@ -85,6 +75,7 @@ class InputCompleter(Completer):
                         display=clean(value),
                     )
             return
+
         # Completion is opt-in for normal text; never pop a file menu over prose.
         match = re.search(r'(?:^|\s)@("?)([^"\n]*)$', text)
         if match:
@@ -95,6 +86,7 @@ class InputCompleter(Completer):
                 directory = completion.display_text.endswith("/")
                 if directory:
                     completion.text += "/"
+
                 if quote and not directory:
                     completion.text += '"'
                 elif not quote and " " in path + completion.text:
@@ -156,12 +148,22 @@ class UI:
         self.console = Console(no_color=not self.color, highlight=False)
         self.completer = InputCompleter()
         self.model_label = "модель не выбрана"
-        self.chat_input = False
         self.account_label = "Аккаунт не загружен"
+        self.chat_input = False
         self.transcript: list[tuple[object, ...]] = []
         self.terminal_size: tuple[int, int] | None = None
         self.prompt: PromptSession[str] | None = None
-        self.style = Style.from_dict(
+        self.live: Live | None = None
+        self.response = ""
+        self.style = self._build_style()
+
+        if sys.stdin.isatty() and sys.stdout.isatty():
+            self.prompt = self._build_prompt()
+
+    def _build_style(self) -> Style:
+        if not self.color:
+            return Style.from_dict({})
+        return Style.from_dict(
             {
                 "prompt": f"bold {COLORS['accent']}",
                 "hint": COLORS["muted"],
@@ -172,60 +174,61 @@ class UI:
                 "completion-menu.meta.completion.current": "bg:#30302e #f3f2ee",
                 "bottom-toolbar": "noreverse",
             }
-            if self.color
-            else {}
         )
-        if sys.stdin.isatty() and sys.stdout.isatty():
-            self.prompt = PromptSession(
-                multiline=True,
-                key_bindings=input_bindings(self),
-                completer=self.completer,
-                complete_while_typing=True,
-                enable_history_search=False,
-                style=self.style,
-                color_depth=None if self.color else ColorDepth.DEPTH_1_BIT,
-                reserve_space_for_menu=0,
-                prompt_continuation="  ",
-                erase_when_done=True,
+
+    def _build_prompt(self) -> PromptSession[str]:
+        prompt: PromptSession[str] = PromptSession(
+            multiline=True,
+            key_bindings=input_bindings(self),
+            completer=self.completer,
+            complete_while_typing=True,
+            enable_history_search=False,
+            style=self.style,
+            color_depth=None if self.color else ColorDepth.DEPTH_1_BIT,
+            reserve_space_for_menu=0,
+            prompt_continuation="  ",
+            erase_when_done=True,
+        )
+        prompt.app.before_render += self._before_render
+        self._frame_layout(prompt)
+        return prompt
+
+    def _frame_layout(self, prompt: PromptSession[str]) -> None:
+        layout = prompt.layout.container
+        assert isinstance(layout, HSplit)
+        chat_active = Condition(lambda: self.chat_input) & ~is_done
+
+        def separator() -> ConditionalContainer:
+            return ConditionalContainer(
+                Window(height=1, char="─", style="class:input-border"),
+                filter=chat_active,
             )
-            self.prompt.app.before_render += self._before_render
-            layout = self.prompt.layout.container
-            assert isinstance(layout, HSplit)
-            chat_active = Condition(lambda: self.chat_input) & ~is_done
 
-            def separator() -> ConditionalContainer:
-                return ConditionalContainer(
-                    Window(height=1, char="─", style="class:input-border"),
-                    filter=chat_active,
-                )
-
-            layout.children.insert(0, separator())
-            layout.children.insert(2, separator())
-            layout.children.insert(
-                3,
-                ConditionalContainer(
-                    VSplit(
-                        [
-                            Window(
-                                FormattedTextControl(" /help — команды"),
-                                width=18,
-                                height=1,
-                                style="class:hint",
-                            ),
-                            Window(
-                                FormattedTextControl(lambda: self.model_label + " "),
-                                align=WindowAlign.RIGHT,
-                                height=1,
-                                wrap_lines=False,
-                                style="class:hint",
-                            ),
-                        ]
-                    ),
-                    filter=chat_active,
+        layout.children.insert(0, separator())
+        layout.children.insert(2, separator())
+        layout.children.insert(
+            3,
+            ConditionalContainer(
+                VSplit(
+                    [
+                        Window(
+                            FormattedTextControl(" /help — команды"),
+                            width=18,
+                            height=1,
+                            style="class:hint",
+                        ),
+                        Window(
+                            FormattedTextControl(lambda: self.model_label + " "),
+                            align=WindowAlign.RIGHT,
+                            height=1,
+                            wrap_lines=False,
+                            style="class:hint",
+                        ),
+                    ]
                 ),
-            )
-        self.live: Live | None = None
-        self.response = ""
+                filter=chat_active,
+            ),
+        )
 
     def _print(self, *objects: object) -> None:
         self.transcript.append(objects)
@@ -239,12 +242,14 @@ class UI:
             self.prompt.reserve_space_for_menu = (
                 min(len(state.completions), 6) + 1 if state and state.completions else 0
             )
+
         size = app.output.get_size()
         width = size.columns
         previous_size = self.terminal_size
         self.terminal_size = (size.columns, size.rows)
         if previous_size is None or previous_size == self.terminal_size:
             return
+
         # Re-render Rich objects at the new width. Old terminal cells cannot be
         # reflowed reliably: full-width rules otherwise leave duplicate rows.
         app.output.erase_screen()
@@ -264,6 +269,7 @@ class UI:
     def notice(self, title: str, body: str = "", kind: NoticeKind = "info") -> None:
         color = COLORS["accent" if kind == "warning" else kind]
         symbol = {"info": "│", "warning": "!", "error": "×", "success": "✓"}[kind]
+
         self._print()
         self._print(Text(f"{symbol} {clean(title)}", style=f"bold {color}"))
         if body:
@@ -272,11 +278,13 @@ class UI:
 
     def header(self, model: str | None, root: Path) -> None:
         self.model_label = clean(model) if model else "модель не выбрана · /model"
+
         info = Text()
         info.append("SpiritCode\n", style=f"bold {COLORS['accent']}")
         info.append(clean(self.account_label) + "\n", style=COLORS["muted"])
         info.append(self.model_label + "\n", style=COLORS["muted"])
         info.append(clean(str(root)), style=COLORS["muted"])
+
         self._print()
         if self.console.width >= 64:
             layout = Table.grid(padding=(0, 3))
@@ -311,6 +319,7 @@ class UI:
                     color_depth=None if self.color else ColorDepth.DEPTH_1_BIT,
                 )
                 return await password_prompt.prompt_async(clean(text), is_password=True)
+
             self.chat_input = chat
             buffer = self.prompt.default_buffer
             previous_text = ""
@@ -324,11 +333,13 @@ class UI:
 
             # prompt-toolkit only autocompletes insertions by default.
             buffer.on_text_changed += complete_after_deletion
+
             extended_keyboard = prepare_keyboard(self.prompt.app.input) and chat
             output = self.prompt.app.output
             if extended_keyboard:
                 output.write_raw("\x1b[>5u")
                 output.flush()
+
             try:
                 result = await self.prompt.prompt_async(
                     [("class:prompt", clean(text))],
@@ -346,11 +357,11 @@ class UI:
                     output.write_raw("\x1b[<u")
                     output.flush()
                 self.chat_input = False
+
         # Piped input has no cursor controls, animations, or background reader.
         if secret:
-            import getpass
-
             return getpass.getpass(clean(text))
+
         line = sys.stdin.readline()
         if not line:
             raise EOFError
@@ -363,6 +374,7 @@ class UI:
         if self.prompt is None:
             self.notice("Настройки не изменены", "Нужен интерактивный терминал.", "warning")
             return None
+
         labels = ("Полная защита", "Стандартная защита", "Без защиты")
         details = (
             "Каждая shell-команда требует разрешения. Точечные правки автоматические.",
@@ -408,9 +420,11 @@ class UI:
                         ("❯ " if index == selected else "  ") + label + "\n",
                     )
                 )
+
             rows.append(("", "\n" + details[selected] + "\n"))
             if PERMISSION_MODES[selected] == "unrestricted":
                 rows.append(("", ("[x]" if deletion else "[ ]") + " Спрашивать перед удалением\n"))
+
             rows.append(
                 (
                     "class:hint",
@@ -419,8 +433,6 @@ class UI:
                 )
             )
             return rows
-
-        from prompt_toolkit.layout import Layout
 
         app: Application[tuple[PermissionMode, bool] | None] = Application(
             layout=Layout(Window(FormattedTextControl(content))),
@@ -441,6 +453,7 @@ class UI:
         if not self.prompt:
             self.notice("Действие отклонено", "Нет интерактивного терминала.", "warning")
             return False
+
         try:
             return (await self.ask("Разрешить? [да/нет] ")).strip().lower() in {"да", "yes", "y"}
         except (KeyboardInterrupt, EOFError):

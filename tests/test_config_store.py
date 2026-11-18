@@ -2,9 +2,9 @@ from unittest.mock import patch
 
 import pytest
 
-from spiritcode.config import Settings
-from spiritcode.credentials import Credentials
-from spiritcode.store import Store, new_session
+from spiritcode.core.config import Settings
+from spiritcode.core.credentials import Credentials
+from spiritcode.core.store import Store, new_session
 
 
 @pytest.mark.parametrize(
@@ -24,7 +24,7 @@ def test_default_server_follows_node_env(tmp_path, monkeypatch, environment, exp
         monkeypatch.delenv("NODE_ENV", raising=False)
     else:
         monkeypatch.setenv("NODE_ENV", environment)
-    with patch("spiritcode.config.config_path", return_value=tmp_path / "config.toml"):
+    with patch("spiritcode.core.config.config_path", return_value=tmp_path / "config.toml"):
         assert Settings().base_url == expected
         assert Settings.load().base_url == expected
 
@@ -32,7 +32,7 @@ def test_default_server_follows_node_env(tmp_path, monkeypatch, environment, exp
 def test_saving_model_does_not_pin_environment_server(tmp_path, monkeypatch):
     monkeypatch.delenv("SPIRITLM_BASE_URL", raising=False)
     monkeypatch.setenv("NODE_ENV", "development")
-    with patch("spiritcode.config.config_path", return_value=tmp_path / "config.toml"):
+    with patch("spiritcode.core.config.config_path", return_value=tmp_path / "config.toml"):
         Settings.load().save_model("test-model")
         monkeypatch.delenv("NODE_ENV")
         assert Settings.load().base_url == "https://spiritlm.netlify.app"
@@ -45,7 +45,7 @@ def test_config_precedence_and_no_keys(tmp_path, monkeypatch):
     monkeypatch.setenv("SPIRITLM_BASE_URL", "https://env.example")
     monkeypatch.setenv("SPIRITLM_MODEL", "env")
     monkeypatch.setenv("NO_COLOR", "")
-    with patch("spiritcode.config.config_path", return_value=path):
+    with patch("spiritcode.core.config.config_path", return_value=path):
         assert Settings.load().base_url == "https://env.example"
         settings = Settings.load("https://cli.example", "cli")
         assert settings.model == "cli"
@@ -84,7 +84,7 @@ def test_session_redacts_keys_and_preserves_money(tmp_path):
 @pytest.mark.parametrize("mode", ["standard", "unrestricted", "full"])
 @pytest.mark.parametrize("deletion", [True, False])
 def test_permission_settings_round_trip_and_model_changes(tmp_path, mode, deletion):
-    with patch("spiritcode.config.config_path", return_value=tmp_path / "config.toml"):
+    with patch("spiritcode.core.config.config_path", return_value=tmp_path / "config.toml"):
         settings = Settings()
         settings.save_permissions(mode, deletion)
         settings.save_model("next")
@@ -107,7 +107,7 @@ def test_permission_settings_round_trip_and_model_changes(tmp_path, mode, deleti
 def test_invalid_permission_settings_fail_closed(tmp_path, values):
     path = tmp_path / "config.toml"
     path.write_text(values)
-    with patch("spiritcode.config.config_path", return_value=path):
+    with patch("spiritcode.core.config.config_path", return_value=path):
         settings = Settings.load()
         assert settings.permission_mode == "standard"
         assert settings.confirm_deletion is True

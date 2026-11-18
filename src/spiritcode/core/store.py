@@ -5,17 +5,19 @@ import uuid
 from pathlib import Path
 from typing import Any
 
-from spiritcode.config import data_path
-from spiritcode.ui import KEY
+from spiritcode.core.config import data_path
+from spiritcode.sanitize import KEY
 
 
 class Store:
     def __init__(self, path: Path | None = None) -> None:
         path = path or data_path() / "sessions.sqlite3"
         path.parent.mkdir(parents=True, exist_ok=True)
+
         self.db = sqlite3.connect(path)
         if os.name != "nt":
             path.chmod(0o600)
+
         self.db.execute("""CREATE TABLE IF NOT EXISTS sessions (
             id TEXT PRIMARY KEY, root TEXT NOT NULL, model TEXT NOT NULL,
             messages TEXT NOT NULL, snapshots TEXT NOT NULL, updated TEXT NOT NULL
@@ -49,9 +51,11 @@ class Store:
         row = self.db.execute("SELECT * FROM sessions WHERE id = ?", (session_id,)).fetchone()
         if not row:
             raise ValueError("Сессия не найдена. Укажите полный ID из /sessions.")
+
         diagnostics = self.db.execute(
             "SELECT requests FROM session_diagnostics WHERE session_id = ?", (session_id,)
         ).fetchone()
+
         return {
             "id": row[0],
             "root": row[1],

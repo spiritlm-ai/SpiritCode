@@ -50,8 +50,9 @@ include = [
   "/scripts/check_install.py",
   "/scripts/publish.py",
   "/README.md",
-  "/image.png",
-  "/SERVER_CONTRACT.md",
+  "/images/cli.png",
+  "/images/icon.png",
+  "/docs/SERVER_CONTRACT.md",
   "/pyproject.toml",
 ]
 

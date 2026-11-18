@@ -6,9 +6,11 @@ import sys
 
 import pytest
 
-from spiritcode.config import Settings
-from spiritcode.tools import Tools, project_files
-from spiritcode.ui import UI, clean
+from spiritcode.core.config import Settings
+from spiritcode.sanitize import clean
+from spiritcode.tools.executor import Tools
+from spiritcode.tools.files import project_files
+from spiritcode.ui.interface import UI
 
 
 class FakeUI(UI):

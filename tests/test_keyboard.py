@@ -3,7 +3,7 @@
 import pytest
 from prompt_toolkit.keys import Keys
 
-from spiritcode.keyboard import KeyboardParser
+from spiritcode.ui.keyboard import KeyboardParser
 
 
 @pytest.mark.parametrize(
@@ -74,7 +74,7 @@ async def test_russian_control_c_interrupts_the_chat_instead_of_inserting_text(s
     from prompt_toolkit.input import create_pipe_input
     from prompt_toolkit.output import DummyOutput
 
-    from spiritcode.ui import UI, input_bindings
+    from spiritcode.ui.interface import UI, input_bindings
 
     ui = UI(color=False)
     with create_pipe_input() as pipe:
@@ -103,7 +103,7 @@ async def test_russian_editing_shortcuts_use_existing_chat_bindings(sequence, ex
     from prompt_toolkit.input import create_pipe_input
     from prompt_toolkit.output import DummyOutput
 
-    from spiritcode.ui import UI, input_bindings
+    from spiritcode.ui.interface import UI, input_bindings
 
     ui = UI(color=False)
     with create_pipe_input() as pipe:
