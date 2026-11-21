@@ -45,6 +45,12 @@ class Agent:
     def save(self) -> None:
         self.store.save(self.session)
 
+    async def system_message(self) -> dict[str, str]:
+        content = await asyncio.to_thread(
+            system_context, self.tools.root, self.tools.settings.system_prompt
+        )
+        return {"role": "system", "content": content}
+
     def repair_pending(self) -> None:
         """Every missing tool result is closed, never replayed, after interruption or recovery."""
         completed = {m.get("tool_call_id") for m in self.messages if m["role"] == "tool"}
@@ -228,10 +234,7 @@ class Agent:
 
         try:
             for _ in range(MAX_ITERATIONS):
-                context = {
-                    "role": "system",
-                    "content": await asyncio.to_thread(system_context, self.tools.root),
-                }
+                context = await self.system_message()
                 output = min(
                     DEFAULT_OUTPUT_TOKENS, self.model.max_output_tokens or DEFAULT_OUTPUT_TOKENS
                 )

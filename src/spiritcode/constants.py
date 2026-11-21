@@ -25,7 +25,7 @@ COLORS = {
 
 BACKGROUND = "#080808"
 
-STAR = r"""          .-.
+STAR = r"""           .-.
           /   \
       .--'     '--.
      /     | |     \
@@ -54,6 +54,8 @@ FALLBACK_CONTEXT = 16_000
 DEFAULT_OUTPUT_TOKENS = 4_096
 COMPACTION_THRESHOLD = 0.75
 
-EXCLUDED = {".git", ".venv", "node_modules", "__pycache__", "dist", "build", ".next"}
+EXCLUDED = {".git", ".venv", "node_modules",
+            "__pycache__", "dist", "build", ".next"}
 
-SECRET_NAMES = {".env", ".npmrc", ".pypirc", "id_rsa", "id_ed25519", "credentials"}
+SECRET_NAMES = {".env", ".npmrc", ".pypirc",
+                "id_rsa", "id_ed25519", "credentials"}

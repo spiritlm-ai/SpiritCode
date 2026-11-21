@@ -152,6 +152,17 @@ async def interactive(
             elif command == "/context":
                 await cancellable(show_context(chat.session, chat.agent, ui), ui)
 
+            elif command == "/system":
+                if not argument:
+                    ui.say(settings.system_prompt or "Дополнительный системный промпт не задан.")
+                    ui.muted("/system <текст> — сохранить · /system --reset — сбросить")
+                elif argument == "--reset":
+                    settings.save_system_prompt("")
+                    ui.notice("Системный промпт сброшен")
+                else:
+                    settings.save_system_prompt(argument)
+                    ui.notice("Системный промпт сохранён", "Настройка действует для всех проектов.")
+
             elif command == "/model":
                 chosen = await cancellable(choose_model(client, settings, ui, argument or None), ui)
                 if chosen is not None:

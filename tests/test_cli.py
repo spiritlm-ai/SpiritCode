@@ -1,4 +1,5 @@
 import io
+import json
 import sqlite3
 from unittest.mock import AsyncMock, Mock, patch
 
@@ -12,6 +13,7 @@ from spiritcode.core.api import ApiError, Client
 from spiritcode.core.config import Settings
 from spiritcode.core.models import Model
 from spiritcode.core.store import Store
+from spiritcode.prompts import SYSTEM
 from spiritcode.tools.executor import Tools
 from spiritcode.ui.interface import UI
 from tests.test_agent import event, sse
@@ -418,6 +420,54 @@ async def test_permission_command_preserved_across_model_and_sessions(tmp_path, 
         assert not settings.confirm_deletion
         assert Settings.load().permission_mode == "unrestricted"
         assert not Settings.load().confirm_deletion
+    finally:
+        await client.close()
+        store.close()
+
+
+async def test_system_command_updates_model_requests_and_settings(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    config = tmp_path / "config.toml"
+    monkeypatch.setattr("spiritcode.core.config.config_path", lambda: config)
+    (tmp_path / "AGENTS.md").write_text("Инструкции проекта.", encoding="utf-8")
+    settings = Settings(model="test")
+    prompt = 'Отвечай кратко.\nИспользуй "примеры".'
+    secret = "sk-spiritlm-secret"
+    saved_prompt = prompt + " [ключ скрыт]"
+    system_messages = []
+
+    def handler(request):
+        assert request.url.path == "/v1/chat/completions"
+        messages = json.loads(request.content)["messages"]
+        assert messages[0]["role"] == "system"
+        system_messages.append(messages[0]["content"])
+        assert Settings.load().system_prompt == (saved_prompt if len(system_messages) == 1 else "")
+        return httpx.Response(200, content=sse([event({"content": "Готово"}, "stop")]))
+
+    client = Client(settings, "test", httpx.MockTransport(handler))
+    client.models = AsyncMock(return_value=[Model(id="test")])
+    store = Store(tmp_path / "sessions.db")
+    ui, output = captured_ui()
+    ui.ask = AsyncMock(
+        side_effect=[
+            f"/system {prompt} {secret}",
+            "/system",
+            "Первое сообщение",
+            "/system --reset",
+            "Второе сообщение",
+            "/exit",
+        ]
+    )
+    try:
+        await interactive(client, settings, ui, store)
+        assert len(system_messages) == 2
+        assert all(message.startswith(SYSTEM) for message in system_messages)
+        assert all("Инструкции проекта." in message for message in system_messages)
+        assert saved_prompt in system_messages[0]
+        assert saved_prompt not in system_messages[1]
+        assert saved_prompt in output.getvalue()
+        assert secret not in output.getvalue()
+        assert "system_prompt" not in config.read_text(encoding="utf-8")
     finally:
         await client.close()
         store.close()

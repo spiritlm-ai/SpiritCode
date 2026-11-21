@@ -13,6 +13,7 @@ class Command:
 COMMANDS = (
     Command("/help", "Все команды и сочетания клавиш"),
     Command("/model", "Поиск и смена модели", "[id]"),
+    Command("/system", "Показать, задать или сбросить системный промпт", "[текст|--reset]"),
     Command("/context", "Контекст, токены и диагностика сессии"),
     Command("/profile", "Профиль SpiritLM"),
     Command("/balance", "Баланс аккаунта"),

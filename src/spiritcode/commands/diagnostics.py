@@ -1,11 +1,10 @@
 """Context, token budget, and request diagnostics."""
 
-import asyncio
 from typing import Any
 
 from spiritcode.constants import DEFAULT_OUTPUT_TOKENS
 from spiritcode.core.agent import Agent
-from spiritcode.core.context import estimate_tokens, input_budget, system_context
+from spiritcode.core.context import estimate_tokens, input_budget
 from spiritcode.ui.interface import UI
 
 DIAGNOSTIC_STATUSES = {"completed": "завершён", "error": "ошибка", "cancelled": "прерван"}
@@ -17,10 +16,7 @@ async def show_context(session: dict[str, Any], agent: Agent | None, ui: UI) -> 
     rows = [("Сессия", session["id"]), ("Модель", agent.model.id if agent else "не выбрана")]
 
     if agent:
-        context = {
-            "role": "system",
-            "content": await asyncio.to_thread(system_context, agent.tools.root),
-        }
+        context = await agent.system_message()
         output = min(DEFAULT_OUTPUT_TOKENS, agent.model.max_output_tokens or DEFAULT_OUTPUT_TOKENS)
         budget = input_budget(agent.model.context_window, output)
         estimated = estimate_tokens([context, *agent.messages]) + estimate_tokens(

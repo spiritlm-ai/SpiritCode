@@ -23,7 +23,7 @@ def project_root(directory: Path) -> Path:
         return directory.resolve()
 
 
-def system_context(root: Path) -> str:
+def system_context(root: Path, system_prompt: str = "") -> str:
     files = project_files(root)
 
     instructions = []
@@ -62,8 +62,12 @@ def system_context(root: Path) -> str:
         if not any(part in EXCLUDED for part in path.parts)
     )
 
+    custom_instructions = (
+        f"\nUser-configured instructions:\n{system_prompt}\n" if system_prompt else ""
+    )
     return clean(
         SYSTEM
+        + custom_instructions
         + f"\nProject root: {root}\n"
         + "".join(instructions)
         + f"\nProject structure (first 150 files):\n{tree}\nGit status:\n{status}"

@@ -10,6 +10,7 @@ from urllib.parse import urlsplit
 from platformdirs import user_config_path, user_data_path
 
 from spiritcode.constants import API_PATHS, BASE_URL, DEV_BASE_URL
+from spiritcode.sanitize import clean
 from spiritcode.types import PERMISSION_MODES, PermissionMode
 
 
@@ -52,6 +53,7 @@ class Settings:
     permission_mode: PermissionMode = "standard"
     confirm_deletion: bool = True
     permissions_warning: bool = False
+    system_prompt: str = ""
 
     def url(self, name: str) -> str:
         return self.base_url + API_PATHS[name]
@@ -64,6 +66,7 @@ class Settings:
         mode = values.get("permission_mode", "standard")
         deletion = values.get("confirm_deletion", True)
         invalid = mode not in PERMISSION_MODES or not isinstance(deletion, bool)
+        prompt = values.get("system_prompt")
 
         return cls(
             validate_base_url(
@@ -76,6 +79,7 @@ class Settings:
             "standard" if invalid else mode,
             True if invalid else deletion,
             invalid,
+            system_prompt=clean(prompt).strip() if isinstance(prompt, str) else "",
         )
 
     def save_model(self, model: str) -> None:
@@ -85,16 +89,21 @@ class Settings:
         self._save(permission_mode=mode, confirm_deletion=confirm_deletion)
         self.permissions_warning = False
 
+    def save_system_prompt(self, prompt: str) -> None:
+        self._save(system_prompt=clean(prompt).strip())
+
     def _save(
         self,
         *,
         model: str | None = None,
         permission_mode: PermissionMode | None = None,
         confirm_deletion: bool | None = None,
+        system_prompt: str | None = None,
     ) -> None:
         model = model if model is not None else self.model
         mode = permission_mode if permission_mode is not None else self.permission_mode
         deletion = confirm_deletion if confirm_deletion is not None else self.confirm_deletion
+        prompt = system_prompt if system_prompt is not None else self.system_prompt
         path = config_path()
         path.parent.mkdir(parents=True, exist_ok=True)
 
@@ -111,10 +120,12 @@ class Settings:
             + (f"model = {json.dumps(model, ensure_ascii=False)}\n" if model else "")
             + f"color = {str(self.color).lower()}\n"
             + f"permission_mode = {json.dumps(mode)}\n"
-            + f"confirm_deletion = {str(deletion).lower()}\n",
+            + f"confirm_deletion = {str(deletion).lower()}\n"
+            + (f"system_prompt = {json.dumps(prompt, ensure_ascii=False)}\n" if prompt else ""),
             encoding="utf-8",
         )
 
         self.model = model
         self.permission_mode = mode
         self.confirm_deletion = deletion
+        self.system_prompt = prompt
