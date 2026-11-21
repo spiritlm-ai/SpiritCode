@@ -482,6 +482,9 @@ async def test_chat_keeps_a_draft_and_queues_input_while_streaming():
     from prompt_toolkit.application import create_app_session
     from prompt_toolkit.input import create_pipe_input
     from prompt_toolkit.output import DummyOutput
+    from rich.text import Text
+
+    from spiritcode.constants import COLORS
 
     approval_visible = asyncio.Event()
 
@@ -500,20 +503,49 @@ async def test_chat_keeps_a_draft_and_queues_input_while_streaming():
         patch("sys.stdout.isatty", return_value=True),
     ):
         ui = UI(color=False)
-        ui.console = Console(file=io.StringIO(), no_color=True)
+        transcript = io.StringIO()
+        ui.console = Console(file=transcript, no_color=True)
         assert ui.prompt is not None
         app = ui.prompt.app
+        thinking_frames = set()
+        queued_rows = {}
+        ready = asyncio.Event()
+        next_turn_visible = asyncio.Event()
+
+        def after_render(_):
+            screen = app.renderer.last_rendered_screen
+            if screen is None:
+                return
+            queued_rows.clear()
+            for row in screen.data_buffer.values():
+                line = "".join(cell.char for _, cell in sorted(row.items())).strip()
+                if line.startswith("Думаю"):
+                    thinking_frames.add(line)
+                if line.startswith("● "):
+                    queued_rows[line] = row[0].style
+            if len(thinking_frames) == 3 and ui.prompt.default_buffer.text == "черновик":
+                ready.set()
+            if list(queued_rows) == ["● Третий"] and "● Второй" in transcript.getvalue():
+                next_turn_visible.set()
+
+        app.after_render += after_render
         async with ui.chat_session(), asyncio.timeout(3):
             pipe.send_text("Первый\r")
             assert await ui.next_chat_input() == "Первый"
             ui.begin_response()
-            ui.delta("Поток ответа")
             pipe.send_text("Второй\rТретий\rчерновик")
-            assert await ui.next_chat_input() == "Второй"
-            assert await ui.next_chat_input() == "Третий"
+            await ready.wait()
+            assert thinking_frames == {"Думаю.", "Думаю..", "Думаю..."}
+            assert ui._chat_hint() == " В очереди: 2"
+            assert "● Первый" in transcript.getvalue()
+            assert list(queued_rows) == ["● Второй", "● Третий"]
+            assert all("class:hint" in style for style in queued_rows.values())
+            assert "Второй" not in transcript.getvalue() and "Третий" not in transcript.getvalue()
             assert app.is_running and ui.streaming
             assert ui.prompt.default_buffer.text == "черновик"
 
+            ui.delta("Поток ответа")
+            assert ui.thinking_timer is None
             ui.end_response()
             approval = asyncio.create_task(ui.approve("Проверка"))
             try:
@@ -525,5 +557,17 @@ async def test_chat_keeps_a_draft_and_queues_input_while_streaming():
                     approval.cancel()
             assert app.is_running
             assert ui.prompt.default_buffer.text == "черновик"
+            assert await ui.next_chat_input() == "Второй"
+            ui.begin_response()
+            await next_turn_visible.wait()
+            active_prompt = next(
+                item
+                for row in ui.transcript
+                for item in row
+                if isinstance(item, Text) and item.plain == "● Второй"
+            )
+            assert active_prompt.style == COLORS["accent"]
+            ui.end_response()
+            assert await ui.next_chat_input() == "Третий"
             pipe.send_text("\r")
             assert await ui.next_chat_input() == "черновик"

@@ -4,6 +4,7 @@ import io
 import os
 import re
 import sys
+from collections import deque
 from collections.abc import AsyncIterator, Callable, Iterable
 from contextlib import asynccontextmanager, suppress
 from pathlib import Path
@@ -22,6 +23,7 @@ from prompt_toolkit.key_binding import KeyBindings
 from prompt_toolkit.layout import ConditionalContainer, HSplit, Layout, VSplit, Window
 from prompt_toolkit.layout.containers import WindowAlign
 from prompt_toolkit.layout.controls import FormattedTextControl
+from prompt_toolkit.layout.dimension import Dimension
 from prompt_toolkit.mouse_events import MouseEvent, MouseEventType
 from prompt_toolkit.output import ColorDepth
 from prompt_toolkit.styles import Style
@@ -35,7 +37,7 @@ from rich.syntax import Syntax
 from rich.table import Table
 from rich.text import Text
 
-from spiritcode.constants import COLORS, STAR
+from spiritcode.constants import COLORS, STAR, THINKING_FRAMES, THINKING_INTERVAL
 from spiritcode.core.config import Settings
 from spiritcode.sanitize import clean
 from spiritcode.types import PERMISSION_MODES, NoticeKind, PermissionMode
@@ -143,7 +145,7 @@ def input_bindings(ui: "UI") -> KeyBindings:
             elif ui.cancel_active is not None:
                 ui.cancel_active()
             else:
-                ui.chat_requests.put_nowait(KeyboardInterrupt())
+                ui._enqueue_chat_input(KeyboardInterrupt())
             return
         event.app.exit(exception=KeyboardInterrupt)
 
@@ -169,7 +171,10 @@ class UI:
         self.live: Live | None = None
         self.response = ""
         self.streaming = False
-        self.chat_requests: asyncio.Queue[str | BaseException] | None = None
+        self.thinking_frame = 0
+        self.thinking_timer: asyncio.TimerHandle | None = None
+        self.chat_requests: deque[str | BaseException] | None = None
+        self.chat_input_ready = asyncio.Event()
         self.cancel_active: Callable[[], object] | None = None
         self.terminal_writes: list[Callable[[], None]] = []
         self.terminal_job: asyncio.Future[None] | None = None
@@ -250,6 +255,17 @@ class UI:
         layout.children.insert(
             0,
             ConditionalContainer(
+                Window(
+                    FormattedTextControl(self._queued_messages),
+                    height=lambda: Dimension(max=max(1, prompt.app.output.get_size().rows // 3)),
+                    wrap_lines=True,
+                ),
+                filter=chat_active & Condition(lambda: self._waiting_count() > 0),
+            ),
+        )
+        layout.children.insert(
+            0,
+            ConditionalContainer(
                 Window(FormattedTextControl(self._stream_preview)),
                 filter=Condition(lambda: self.streaming and self.chat_requests is not None),
             ),
@@ -263,8 +279,19 @@ class UI:
         self._terminal_write(write)
 
     def _chat_hint(self) -> str:
-        waiting = self.chat_requests.qsize() if self.chat_requests is not None else 0
+        waiting = self._waiting_count()
         return f" В очереди: {waiting}" if waiting else " /help — команды"
+
+    def _waiting_count(self) -> int:
+        return sum(isinstance(item, str) for item in self.chat_requests or ())
+
+    def _queued_messages(self) -> StyleAndTextTuples:
+        messages = (
+            "● " + clean(item).strip().replace("\n", "\n  ")
+            for item in self.chat_requests or ()
+            if isinstance(item, str)
+        )
+        return [("class:hint", "\n".join(messages))]
 
     def _terminal_write(self, write: Callable[[], None]) -> None:
         if self.chat_requests is None or self.prompt is None or not self.prompt.app.is_running:
@@ -281,7 +308,9 @@ class UI:
             with set_app(self.prompt.app):
                 self.terminal_job = asyncio.ensure_future(run_in_terminal(flush))
 
-    def _stream_preview(self) -> ANSI:
+    def _stream_preview(self) -> ANSI | StyleAndTextTuples:
+        if not self.response:
+            return [("class:hint", "  " + THINKING_FRAMES[self.thinking_frame])]
         assert self.prompt is not None
         size = self.prompt.app.output.get_size()
         stream = io.StringIO()
@@ -291,8 +320,21 @@ class UI:
             force_terminal=self.color,
             no_color=not self.color,
         )
-        console.print(self._response_content() if self.response else Text("  Думаю…"))
+        console.print(self._response_content())
         return ANSI("\n".join(stream.getvalue().splitlines()[-max(1, size.rows // 2) :]))
+
+    def _advance_thinking_frame(self) -> None:
+        assert self.prompt is not None
+        self.thinking_frame = (self.thinking_frame + 1) % len(THINKING_FRAMES)
+        self.prompt.app.invalidate()
+        self.thinking_timer = asyncio.get_running_loop().call_later(
+            THINKING_INTERVAL, self._advance_thinking_frame
+        )
+
+    def _stop_thinking_animation(self) -> None:
+        if self.thinking_timer is not None:
+            self.thinking_timer.cancel()
+            self.thinking_timer = None
 
     @asynccontextmanager
     async def chat_session(self) -> AsyncIterator[None]:
@@ -300,28 +342,28 @@ class UI:
             yield
             return
 
-        queue: asyncio.Queue[str | BaseException] = asyncio.Queue()
-        self.chat_requests = queue
+        self.chat_requests = deque()
+        self.chat_input_ready.clear()
         buffer = self.prompt.default_buffer
         previous_handler = buffer.accept_handler
 
         def accept(buffer: Buffer) -> bool:
             if buffer.text.strip():
-                self._print(Text("❯ " + clean(buffer.text), style=COLORS["accent"]))
-                queue.put_nowait(buffer.text)
+                self._enqueue_chat_input(buffer.text)
             return False
 
         async def read_input() -> None:
             try:
                 await self.ask(chat=True)
             except (Exception, KeyboardInterrupt) as exc:
-                queue.put_nowait(exc)
+                self._enqueue_chat_input(exc)
 
         buffer.accept_handler = accept
         reader = asyncio.create_task(read_input())
         try:
             yield
         finally:
+            self._stop_thinking_animation()
             try:
                 if self.terminal_job is not None:
                     await self.terminal_job
@@ -332,14 +374,27 @@ class UI:
                 buffer.accept_handler = previous_handler
                 self.chat_requests = None
 
+    def _enqueue_chat_input(self, value: str | BaseException) -> None:
+        assert self.chat_requests is not None
+        self.chat_requests.append(value)
+        self.chat_input_ready.set()
+
     async def next_chat_input(self) -> str:
-        if self.chat_requests is None:
+        requests = self.chat_requests
+        if requests is None:
             return await self.ask(chat=True)
-        value = await self.chat_requests.get()
+        while not requests:
+            await self.chat_input_ready.wait()
+        value = requests.popleft()
+        if not requests:
+            self.chat_input_ready.clear()
         if self.prompt is not None:
             self.prompt.app.invalidate()
         if isinstance(value, BaseException):
             raise value
+        prompt = Text("● ", style=COLORS["accent"])
+        prompt.append(clean(value).strip().replace("\n", "\n  "), style=COLORS["text"])
+        self._print(prompt)
         return value
 
     @asynccontextmanager
@@ -658,10 +713,17 @@ class UI:
         self._print(Text("● SpiritCode", style=f"bold {COLORS['accent']}"))
         if self.chat_requests is not None and self.prompt is not None:
             self.streaming = True
+            self.thinking_frame = 0
+            self.thinking_timer = asyncio.get_running_loop().call_later(
+                THINKING_INTERVAL, self._advance_thinking_frame
+            )
             self.prompt.app.invalidate()
         elif self.console.is_terminal:
+            spinner = Spinner("simpleDots", style=COLORS["muted"])
+            spinner.frames = list(THINKING_FRAMES)
+            spinner.interval = THINKING_INTERVAL * 1000
             self.live = Live(
-                Padding(Spinner("dots", text="Думаю…", style=COLORS["muted"]), (0, 0, 0, 2)),
+                Padding(spinner, (0, 0, 0, 2)),
                 console=self.console,
                 refresh_per_second=8,
             )
@@ -672,6 +734,8 @@ class UI:
         if self.live:
             self.live.update(self._response_content())
         elif self.streaming and self.prompt is not None:
+            if self.response:
+                self._stop_thinking_animation()
             self.prompt.app.invalidate()
 
     def _response_content(self) -> Padding:
@@ -680,6 +744,7 @@ class UI:
     def end_response(self) -> None:
         content = self._response_content()
         self.streaming = False
+        self._stop_thinking_animation()
         if self.live:
             self.live.update(content)
             self.live.stop()
