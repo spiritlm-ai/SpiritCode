@@ -1,6 +1,6 @@
 """Developer-tunable values shared across the application."""
 
-BASE_URL = "https://spiritlm.netlify.app"
+BASE_URL = "https://spiritlm.ru"
 DEV_BASE_URL = "http://localhost:3000"
 
 API_PATHS = {

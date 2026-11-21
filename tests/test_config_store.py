@@ -10,10 +10,10 @@ from spiritcode.core.store import Store, new_session
 @pytest.mark.parametrize(
     ("environment", "expected"),
     [
-        (None, "https://spiritlm.netlify.app"),
-        ("", "https://spiritlm.netlify.app"),
-        ("production", "https://spiritlm.netlify.app"),
-        ("test", "https://spiritlm.netlify.app"),
+        (None, "https://spiritlm.ru"),
+        ("", "https://spiritlm.ru"),
+        ("production", "https://spiritlm.ru"),
+        ("test", "https://spiritlm.ru"),
         ("dev", "http://localhost:3000"),
         ("development", "http://localhost:3000"),
     ],
@@ -35,7 +35,7 @@ def test_saving_model_does_not_pin_environment_server(tmp_path, monkeypatch):
     with patch("spiritcode.core.config.config_path", return_value=tmp_path / "config.toml"):
         Settings.load().save_model("test-model")
         monkeypatch.delenv("NODE_ENV")
-        assert Settings.load().base_url == "https://spiritlm.netlify.app"
+        assert Settings.load().base_url == "https://spiritlm.ru"
         assert Settings.load().model == "test-model"
 
 
