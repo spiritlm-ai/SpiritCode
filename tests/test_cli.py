@@ -171,13 +171,13 @@ async def test_account_header_uses_server_identity_and_current_plan(
 def test_catalog_formats_prices_and_keeps_unknown_separate_from_zero():
     models = [
         Model(id="rounded", price_per_million_tokens="11.80900000"),
-        Model(id="zero", price_per_million_tokens="0.00000000"),
+        Model(id="zero", price_per_million_tokens="0.00000000", sample_price=False),
         Model(id="unknown"),
     ]
     assert model_rows(models) == [
-        ("rounded", "11.81 RUB / 1 MTok"),
-        ("zero", "0.00 RUB / 1 MTok"),
-        ("unknown", "неизвестно RUB / 1 MTok"),
+        ("rounded", "11.81 ₽ / 1 млн токенов · ориентир"),
+        ("zero", "0.00 ₽ / 1 млн токенов"),
+        ("unknown", "цена недоступна"),
     ]
 
 

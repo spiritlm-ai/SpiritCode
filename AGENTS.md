@@ -62,8 +62,10 @@ Import direction (keep it acyclic): `constants` / `types` / `sanitize` / `prompt
 - No automatic retries of paid generations; failed streams and compactions keep the original
   history.
 - Interrupted tool calls are closed with a result, never replayed.
-- `edit_file` requires a prior `read_file` of the unchanged content; `/undo` restores files only
-  if they have not changed since the edit.
+- `edit_file` and `edit_files` require a prior `read_file` of the unchanged content. A batch
+  is a separate undo group. `/undo` restores files only if they have not changed since the edit.
+- Scoped `AGENTS.md` instructions must reach the model in a request before a file tool can
+  write under that scope. Only the root instructions are injected into the system context.
 - Child processes receive the environment without `SPIRITLM_API_KEY`.
 - Secrets, binaries, `.git`, and dependencies are excluded from automatic context collection.
 

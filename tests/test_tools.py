@@ -7,6 +7,7 @@ import sys
 import pytest
 
 from spiritcode.core.config import Settings
+from spiritcode.core.store import Store, new_session
 from spiritcode.sanitize import clean
 from spiritcode.tools.executor import Tools
 from spiritcode.tools.files import project_files
@@ -120,9 +121,120 @@ async def test_scoped_agents_and_search(tools, tmp_path):
     (tmp_path / "sub" / "AGENTS.md").write_text("CHILD RULE")
     (tmp_path / "sub" / "file.py").write_text("needle")
     result = await call(tools, "read_file", path="sub/file.py")
-    assert "ROOT RULE" in result and "CHILD RULE" in result
+    assert "ROOT RULE" not in result and "CHILD RULE" in result
     result = await call(tools, "search", query="needle")
     assert "sub/file.py:1:needle" in result
+
+
+async def test_scoped_rules_are_refreshed_before_writes(tools, tmp_path):
+    directory = tmp_path / "sub"
+    directory.mkdir()
+    rules = directory / "AGENTS.md"
+    rules.write_text("version one")
+
+    args = {"path": "sub/new.txt", "content": "hello"}
+    assert "version one" in await call(tools, "list_files", path="sub")
+    assert "Запись отложена" in await call(tools, "create_file", **args)
+    tools.instructions_delivered()
+    rules.write_text("version two")
+    assert "version two" in await call(tools, "create_file", **args)
+    assert not (directory / "new.txt").exists()
+    tools.instructions_delivered()
+    assert "Файл изменён" in await call(tools, "create_file", **args)
+
+
+async def test_batch_changes_round_trip_as_a_separate_undo_group(tmp_path):
+    session = new_session(tmp_path, "test")
+    ui = FakeUI()
+    tools = Tools(tmp_path, ui, session["snapshots"])
+    tools.start_turn()
+    (tmp_path / "a").write_text("one two")
+    (tmp_path / "b").write_text("three")
+    for path in ("a", "b"):
+        await call(tools, "read_file", path=path)
+
+    await call(tools, "create_file", path="before", content="before")
+    edits = [
+        {"path": "a", "old_text": "two", "new_text": "SECOND"},
+        {"path": "b", "old_text": "three", "new_text": "THIRD"},
+        {"path": "a", "old_text": "one", "new_text": "FIRST"},
+    ]
+    assert "Пакет применён" in await call(tools, "edit_files", edits=edits)
+    assert (tmp_path / "a").read_text() == "FIRST SECOND"
+    assert (tmp_path / "b").read_text() == "THIRD"
+    await call(tools, "create_file", path="after", content="after")
+
+    store = Store(tmp_path / "db")
+    try:
+        store.save(session)
+        restored = store.load(session["id"])
+    finally:
+        store.close()
+    resumed = Tools(tmp_path, ui, restored["snapshots"])
+    await resumed.undo()
+    assert not (tmp_path / "after").exists()
+    (tmp_path / "b").write_text("manual")
+    with pytest.raises(ValueError, match="Файл изменён"):
+        await resumed.undo()
+    assert (tmp_path / "a").read_text() == "FIRST SECOND"
+    (tmp_path / "b").write_text("THIRD")
+    await resumed.undo()
+    assert (tmp_path / "a").read_text() == "one two"
+    assert (tmp_path / "b").read_text() == "three"
+    assert (tmp_path / "before").exists()
+    await resumed.undo()
+    assert not (tmp_path / "before").exists()
+
+
+async def test_batch_validates_all_changes_before_writing(tools, tmp_path):
+    (tmp_path / "a").write_text("hello")
+    (tmp_path / "b").write_text("world")
+    for path in ("a", "b"):
+        await call(tools, "read_file", path=path)
+    first = {"path": "a", "old_text": "hello", "new_text": "bye"}
+    overlap = {"path": "a", "old_text": "ello", "new_text": "x"}
+    assert "пересекаются" in await call(tools, "edit_files", edits=[first, overlap])
+
+    second = {"path": "b", "old_text": "world", "new_text": "earth"}
+    (tmp_path / "b").write_text("manual")
+    assert "Сначала прочитайте" in await call(tools, "edit_files", edits=[first, second])
+    tools.ui.approved = False
+    outside = {**second, "path": "../outside"}
+    assert "отклонил" in await call(tools, "edit_files", edits=[first, outside])
+    assert (tmp_path / "a").read_text() == "hello"
+    assert (tmp_path / "b").read_text() == "manual"
+    assert not tools.snapshots
+
+
+@pytest.mark.parametrize("fail_restore", [False, True])
+async def test_batch_restores_files_when_a_later_replace_fails(
+    tools, tmp_path, monkeypatch, fail_restore
+):
+    for path in ("a", "b"):
+        (tmp_path / path).write_text("old")
+        await call(tools, "read_file", path=path)
+    replace = os.replace
+
+    def fail_second(source, target):
+        if target == tmp_path / "b":
+            raise OSError("simulated write failure")
+        if fail_restore and source.read_text() == "old":
+            raise OSError("simulated rollback failure")
+        replace(source, target)
+
+    edits = [{"path": path, "old_text": "old", "new_text": "new"} for path in ("a", "b")]
+    with monkeypatch.context() as patch:
+        patch.setattr(os, "replace", fail_second)
+        result = await call(tools, "edit_files", edits=edits)
+    if fail_restore:
+        assert "Не удалось восстановить" in result
+        assert (tmp_path / "a").read_text() == "new"
+        await tools.undo()
+    else:
+        assert "simulated write failure" in result
+    assert (tmp_path / "a").read_text() == (tmp_path / "b").read_text() == "old"
+    assert not tools.snapshots
+    assert not list(tmp_path.glob(".spiritcode-*"))
 
 
 async def test_command_approval_environment_and_output(tools, monkeypatch):

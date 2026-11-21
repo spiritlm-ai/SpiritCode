@@ -25,6 +25,10 @@ class Permissions:
         self.ui = ui
 
     async def path(self, value: str, action: str) -> Path:
+        _, resolved = await self.checked_path(value, action)
+        return resolved
+
+    async def checked_path(self, value: str, action: str) -> tuple[Path, Path]:
         raw = self.root / await asyncio.to_thread(Path(value).expanduser)
         resolved = raw.resolve()
         if ".git" in raw.parts or ".git" in resolved.parts:
@@ -44,7 +48,7 @@ class Permissions:
         # Revalidate after the human interaction; this is permission control, not a sandbox.
         if raw.resolve() != resolved:
             raise PermissionError("Путь изменился во время подтверждения.")
-        return resolved
+        return raw, resolved
 
 
 @dataclass(frozen=True)

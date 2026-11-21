@@ -256,6 +256,25 @@ def test_reset_clears_terminal_and_scrollback(tmp_path):
     assert ui.model_label == "test"
 
 
+def test_wide_header_draws_the_star_without_clipping(tmp_path):
+    ui = UI(color=False)
+    output = io.StringIO()
+    ui.console = Console(file=output, width=80, no_color=True)
+    ui.header("test", tmp_path)
+
+    lines = output.getvalue().strip("\n").splitlines()
+    assert [line[:17].rstrip() for line in lines] == [
+        "       .-.",
+        "      /   \\",
+        "  .--'     '--.",
+        " /     | |     \\",
+        " \\             /",
+        "  '--.     .--'",
+        "      \\   /",
+        "       '-'",
+    ]
+
+
 async def test_redirected_input_and_permission_refusal(monkeypatch):
     monkeypatch.setenv("NO_COLOR", "1")
     with patch("sys.stdin", io.StringIO("привет\n")), patch("sys.stdout", io.StringIO()):
@@ -430,3 +449,81 @@ async def test_permission_menu_without_terminal_preserves_settings():
     ui = UI(color=False)
     ui.prompt = None
     assert await ui.choose_permissions(Settings()) is None
+
+
+@pytest.mark.parametrize(
+    ("keys", "approved"),
+    [
+        ("\r", False),
+        ("\t\r", True),
+        ("\x1b[D\r", True),
+        ("\x1b", False),
+        ("\x1b[<0;5;2M\x1b[<0;5;2m", True),
+    ],
+)
+async def test_approval_uses_buttons(keys, approved):
+    import asyncio
+
+    from prompt_toolkit import PromptSession
+    from prompt_toolkit.input import create_pipe_input
+    from prompt_toolkit.output import DummyOutput
+
+    ui = UI(color=False)
+    ui.console = Console(file=io.StringIO(), no_color=True)
+    with create_pipe_input() as pipe:
+        ui.prompt = PromptSession(input=pipe, output=DummyOutput())
+        pipe.send_text(keys)
+        assert await asyncio.wait_for(ui.approve("Команда"), 3) is approved
+
+
+async def test_chat_keeps_a_draft_and_queues_input_while_streaming():
+    import asyncio
+
+    from prompt_toolkit.application import create_app_session
+    from prompt_toolkit.input import create_pipe_input
+    from prompt_toolkit.output import DummyOutput
+
+    approval_visible = asyncio.Event()
+
+    class ScreenOutput(DummyOutput):
+        rendered = ""
+
+        def write(self, data):
+            self.rendered += data
+            if "Разрешить действие?" in self.rendered:
+                approval_visible.set()
+
+    with (
+        create_pipe_input() as pipe,
+        create_app_session(input=pipe, output=ScreenOutput()),
+        patch("sys.stdin.isatty", return_value=True),
+        patch("sys.stdout.isatty", return_value=True),
+    ):
+        ui = UI(color=False)
+        ui.console = Console(file=io.StringIO(), no_color=True)
+        assert ui.prompt is not None
+        app = ui.prompt.app
+        async with ui.chat_session(), asyncio.timeout(3):
+            pipe.send_text("Первый\r")
+            assert await ui.next_chat_input() == "Первый"
+            ui.begin_response()
+            ui.delta("Поток ответа")
+            pipe.send_text("Второй\rТретий\rчерновик")
+            assert await ui.next_chat_input() == "Второй"
+            assert await ui.next_chat_input() == "Третий"
+            assert app.is_running and ui.streaming
+            assert ui.prompt.default_buffer.text == "черновик"
+
+            ui.end_response()
+            approval = asyncio.create_task(ui.approve("Проверка"))
+            try:
+                await approval_visible.wait()
+                pipe.send_text("\t\r")
+                assert await approval
+            finally:
+                if not approval.done():
+                    approval.cancel()
+            assert app.is_running
+            assert ui.prompt.default_buffer.text == "черновик"
+            pipe.send_text("\r")
+            assert await ui.next_chat_input() == "черновик"

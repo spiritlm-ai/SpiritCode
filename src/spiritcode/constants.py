@@ -25,14 +25,14 @@ COLORS = {
 
 BACKGROUND = "#080808"
 
-STAR = r"""           .-.
-          /   \
-      .--'     '--.
-     /     | |     \
-     \             /
-      '--.     .--'
-          \   /
-           '-'"""
+STAR = r"""       .-.
+      /   \
+  .--'     '--.
+ /     | |     \
+ \             /
+  '--.     .--'
+      \   /
+       '-'"""
 
 REQUEST_TIMEOUT = 100
 ACCOUNT_TIMEOUT = 5
@@ -40,6 +40,7 @@ COMMAND_TIMEOUT = 120
 
 MAX_ITERATIONS = 30
 MAX_FILE_BYTES = 128_000
+MAX_BATCH_EDITS = 20
 MAX_RESULT_CHARS = 24_000
 MAX_FILES = 2_000
 MAX_SSE_EVENT = 1_048_576
@@ -54,8 +55,6 @@ FALLBACK_CONTEXT = 16_000
 DEFAULT_OUTPUT_TOKENS = 4_096
 COMPACTION_THRESHOLD = 0.75
 
-EXCLUDED = {".git", ".venv", "node_modules",
-            "__pycache__", "dist", "build", ".next"}
+EXCLUDED = {".git", ".venv", "node_modules", "__pycache__", "dist", "build", ".next"}
 
-SECRET_NAMES = {".env", ".npmrc", ".pypirc",
-                "id_rsa", "id_ed25519", "credentials"}
+SECRET_NAMES = {".env", ".npmrc", ".pypirc", "id_rsa", "id_ed25519", "credentials"}

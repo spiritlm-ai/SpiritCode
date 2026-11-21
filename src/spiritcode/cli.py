@@ -45,6 +45,8 @@ async def cancellable[T](operation: Coroutine[Any, Any, T], ui: UI) -> T | None:
     loop = asyncio.get_running_loop()
     # signal.signal works on Windows as well; event-loop signal handlers do not.
     previous = signal.getsignal(signal.SIGINT)
+    previous_cancel = ui.cancel_active
+    ui.cancel_active = task.cancel
     signal.signal(signal.SIGINT, lambda *_: loop.call_soon_threadsafe(task.cancel))
     try:
         return await task
@@ -52,6 +54,7 @@ async def cancellable[T](operation: Coroutine[Any, Any, T], ui: UI) -> T | None:
         ui.notice("Операция прервана")
         return None
     finally:
+        ui.cancel_active = previous_cancel
         signal.signal(signal.SIGINT, previous)
 
 
@@ -96,6 +99,12 @@ async def interactive(
     if chat.model is None:
         ui.muted("Выберите /model, чтобы отправить первое сообщение.")
 
+    async with ui.chat_session():
+        await chat_loop(chat)
+
+
+async def chat_loop(chat: Chat) -> None:
+    client, store, settings, ui = chat.client, chat.store, chat.settings, chat.ui
     interrupted = False
     while True:
         ui.completer.sessions = [
@@ -103,7 +112,7 @@ async def interactive(
         ]
 
         try:
-            text = (await ui.ask(chat=True)).strip()
+            text = (await ui.next_chat_input()).strip()
         except EOFError:
             break
         except KeyboardInterrupt:

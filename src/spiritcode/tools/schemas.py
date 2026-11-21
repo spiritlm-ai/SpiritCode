@@ -4,7 +4,7 @@ from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from spiritcode.constants import COMMAND_TIMEOUT, MAX_FILE_BYTES
+from spiritcode.constants import COMMAND_TIMEOUT, MAX_BATCH_EDITS, MAX_FILE_BYTES
 
 
 class Args(BaseModel):
@@ -37,6 +37,10 @@ class EditFile(Args):
     new_text: str = Field(max_length=MAX_FILE_BYTES)
 
 
+class EditFiles(Args):
+    edits: list[EditFile] = Field(min_length=1, max_length=MAX_BATCH_EDITS)
+
+
 class RunCommand(Args):
     command: str = Field(min_length=1, max_length=10_000)
     cwd: str
@@ -49,15 +53,20 @@ ARGUMENTS: dict[str, type[Args]] = {
     "read_file": ReadFile,
     "create_file": CreateFile,
     "edit_file": EditFile,
+    "edit_files": EditFiles,
     "run_command": RunCommand,
 }
 
 DESCRIPTIONS = {
-    "list_files": "List project files, respecting ignore rules. Never follows directory symlinks.",
+    "list_files": "List project files respecting ignore rules, and scoped AGENTS.md for the path.",
     "search": "Search literal text across project files, respecting ignore rules.",
     "read_file": "Read UTF-8 file lines (inclusive, 1-based), and scoped AGENTS.md instructions.",
     "create_file": "Create a new UTF-8 file. Fails if a file already exists.",
     "edit_file": "Replace exactly one occurrence of old_text. Read the file first.",
+    "edit_files": (
+        "Apply a batch of non-overlapping exact replacements to existing files as one undo group. "
+        "Read every file first. All old_text values refer to the original file contents."
+    ),
     "run_command": (
         "Run any shell command in explicit cwd under the active permission policy. Not a sandbox."
     ),
@@ -69,6 +78,7 @@ TITLES = {
     "read_file": "Чтение",
     "create_file": "Создание",
     "edit_file": "Изменение",
+    "edit_files": "Пакет правок",
     "run_command": "Команда",
 }
 

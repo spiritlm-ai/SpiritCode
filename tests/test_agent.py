@@ -128,6 +128,66 @@ async def test_chat_only_model_never_gets_tools(tmp_path):
     store.close()
 
 
+async def test_agent_delivers_nested_rules_before_allowing_a_write(tmp_path):
+    (tmp_path / "AGENTS.md").write_text("ROOT RULE")
+    for folder, rule in [("sub", "SCOPED RULE"), ("sibling", "SIBLING RULE")]:
+        (tmp_path / folder).mkdir()
+        (tmp_path / folder / "AGENTS.md").write_text(rule)
+    (tmp_path / "sub" / "a").write_text("old")
+    edits = {"edits": [{"path": "sub/a", "old_text": "old", "new_text": "new"}]}
+    requests = []
+
+    def handler(request):
+        payload = json.loads(request.content)
+        requests.append(payload)
+        if len(requests) == 1:
+            events = [
+                event(
+                    {
+                        "tool_calls": [
+                            {
+                                "index": index,
+                                "id": f"call_{index}",
+                                "function": {"name": name, "arguments": json.dumps(args)},
+                            }
+                            for index, (name, args) in enumerate(
+                                [("read_file", {"path": "sub/a"}), ("edit_files", edits)]
+                            )
+                        ]
+                    },
+                    "tool_calls",
+                )
+            ]
+        elif len(requests) == 2:
+            assert (tmp_path / "sub" / "a").read_text() == "old"
+            events = call_events("edit_files", edits, 2)
+        else:
+            events = [event({"content": "Готово"}, "stop")]
+        return httpx.Response(200, content=sse(events))
+
+    client = Client(Settings(), "test", httpx.MockTransport(handler))
+    store, ui = Store(tmp_path / "sessions.db"), AgentUI()
+    session = new_session(tmp_path, "test")
+    tools = Tools(tmp_path, ui, session["snapshots"])
+    agent = Agent(client, Model(id="test", context_window=100_000), session, store, tools, ui)
+    try:
+        await agent.turn("Поправь файл")
+        assert (tmp_path / "sub" / "a").read_text() == "new"
+        assert "ROOT RULE" in requests[0]["messages"][0]["content"]
+        assert "SCOPED RULE" not in requests[0]["messages"][0]["content"]
+        assert "SIBLING RULE" not in json.dumps(requests)
+        assert "SCOPED RULE" in requests[1]["messages"][-2]["content"]
+        assert "Запись отложена" in requests[1]["messages"][-1]["content"]
+        assert "Пакет применён" in requests[2]["messages"][-1]["content"]
+        assert await agent.compact()
+        result = await tools.execute("create_file", '{"path":"sub/b","content":"x"}')
+        assert "Запись отложена" in result
+        assert not (tmp_path / "sub" / "b").exists()
+    finally:
+        await client.close()
+        store.close()
+
+
 async def test_incomplete_tool_call_never_mutates_files(tmp_path):
     events = call_events("create_file", {"path": "bad", "content": "x"}, 0)
     events[-1]["choices"][0]["finish_reason"] = "length"

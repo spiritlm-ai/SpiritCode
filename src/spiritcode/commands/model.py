@@ -14,18 +14,16 @@ from spiritcode.ui.interface import UI
 
 
 def model_rows(models: list[Model]) -> list[tuple[str, str]]:
-    return [
-        (
-            model.id,
-            (
-                f"{Decimal(model.price_per_million_tokens):.2f}"
-                if model.price_per_million_tokens is not None
-                else "неизвестно"
-            )
-            + " RUB / 1 MTok",
-        )
-        for model in models
-    ]
+    rows = []
+    for model in models:
+        if model.price_per_million_tokens is None:
+            price = "цена недоступна"
+        else:
+            price = f"{Decimal(model.price_per_million_tokens):.2f} ₽ / 1 млн токенов"
+            if model.sample_price:
+                price += " · ориентир"
+        rows.append((model.id, price))
+    return rows
 
 
 def set_model_label(ui: UI, model: Model | None) -> None:
@@ -57,6 +55,7 @@ async def resolve_model(client: Client, ui: UI, requested: str | None) -> Model 
 async def choose_model(
     client: Client, settings: Settings, ui: UI, requested: str | None = None
 ) -> Model | None:
+    ui.completer.models = []
     models = await client.models()
     ui.completer.models = [model.id for model in models]
     if not models:

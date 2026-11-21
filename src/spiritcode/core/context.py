@@ -26,23 +26,13 @@ def project_root(directory: Path) -> Path:
 def system_context(root: Path, system_prompt: str = "") -> str:
     files = project_files(root)
 
-    instructions = []
-    remaining = MAX_RESULT_CHARS
+    instructions = ""
     root_instructions = root / "AGENTS.md"
-    instruction_files = [file for file in files if file.name == "AGENTS.md"]
-    if root_instructions.is_file() and not root_instructions.is_symlink():
-        instruction_files = [
-            root_instructions,
-            *[file for file in instruction_files if file != root_instructions],
-        ]
-
-    for file in instruction_files:
-        body = text_file(file)
-        section = f"\nInstructions apply only under {file.parent}:\n{body}\n"
-        if len(section) > remaining:
+    if not root_instructions.is_symlink() and root_instructions.is_file():
+        body = text_file(root_instructions)
+        instructions = clean(f"\nInstructions apply only under {root}:\n{body}\n")
+        if len(instructions) > MAX_RESULT_CHARS:
             raise ValueError("AGENTS.md превышают бюджет контекста; сократите инструкции.")
-        instructions.append(section)
-        remaining -= len(section)
 
     try:
         result = subprocess.run(
@@ -69,7 +59,7 @@ def system_context(root: Path, system_prompt: str = "") -> str:
         SYSTEM
         + custom_instructions
         + f"\nProject root: {root}\n"
-        + "".join(instructions)
+        + instructions
         + f"\nProject structure (first 150 files):\n{tree}\nGit status:\n{status}"
     )
 

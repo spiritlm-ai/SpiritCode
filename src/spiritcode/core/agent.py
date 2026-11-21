@@ -217,6 +217,7 @@ class Agent:
                 + summary["content"],
             }
         ]
+        self.tools.reset_instructions()
         self.save()
         return True
 
@@ -249,6 +250,7 @@ class Agent:
                         raise ApiError("Инструкции проекта превышают бюджет контекста.")
 
                 message = await self.response([context, *self.messages])
+                self.tools.instructions_delivered()
                 self.messages.append(message)
                 self.save()
 
